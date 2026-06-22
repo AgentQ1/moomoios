@@ -472,25 +472,16 @@ struct SidebarView: View {
     
     private func handleExport(session: ChatSession, format: ChatSessionRowView.ExportFormat) {
         let url: URL?
-        let formatString: String
-        
+
         switch format {
         case .txt:
             url = chatViewModel.exportSessionToTXT(session)
-            formatString = "txt"
         case .pdf:
             url = chatViewModel.exportSessionToPDF(session)
-            formatString = "pdf"
         }
-        
+
         if let url = url {
-            // Track export
-            FirebaseService.shared.trackExport(
-                format: formatString,
-                sessionId: session.id,
-                messageCount: session.messageCount
-            )
-            
+            // TODO: BACKEND INTEGRATION — export analytics removed in frontend-only reset.
             shareURL = url
             showShareSheet = true
         }

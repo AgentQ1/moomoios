@@ -527,24 +527,9 @@ struct ChatView: View {
         var message = messageText.trimmed
         print("✅ Sending message: '\(message)'")
         
-        // Track attachments
-        for attachment in attachments {
-            let typeString: String
-            switch attachment.type {
-            case .image: typeString = "image"
-            case .video: typeString = "video"
-            case .document: typeString = "document"
-            case .pdf: typeString = "pdf"
-            case .other: typeString = "other"
-            }
-            FirebaseService.shared.trackAttachmentUsage(
-                type: typeString,
-                size: attachment.data.count,
-                source: "message"
-            )
-        }
-        
-        // For images with Gemini/Claude models, pass attachment data
+        // TODO: BACKEND INTEGRATION — attachment analytics removed in frontend-only reset.
+
+        // For images, pass attachment data
         // Store attachments reference for the API call
         let messageAttachments = attachments
         
@@ -577,26 +562,13 @@ struct ChatView: View {
     
     private func handleReaction(messageId: String, emoji: String) {
         chatViewModel.toggleReaction(messageId: messageId, emoji: emoji)
-        
-        // Track reaction
-        FirebaseService.shared.trackFeatureUsage(
-            feature: "message_reactions",
-            action: "added",
-            metadata: ["emoji": emoji]
-        )
-        
+
         // Haptic feedback
         HapticFeedback.light()
     }
     
     private func handleDeleteMessage(messageId: String) {
         chatViewModel.deleteMessage(messageId: messageId)
-        
-        // Track deletion
-        FirebaseService.shared.trackFeatureUsage(
-            feature: "message_actions",
-            action: "deleted"
-        )
     }
     
     private func handleRegenerate(message: ChatMessage) {
@@ -624,26 +596,7 @@ struct ChatView: View {
             temperature: temperature,
             editedPrompt: editedPrompt
         )
-        
-        // Track regeneration
-        if let session = chatViewModel.currentSession,
-           let messageIndex = session.messages.firstIndex(where: { $0.id == messageId }) {
-            let attemptNumber = messageIndex + 1
-            FirebaseService.shared.trackRegeneration(
-                messageId: messageId,
-                attemptNumber: attemptNumber
-            )
-        }
-        
-        FirebaseService.shared.trackFeatureUsage(
-            feature: "message_regeneration",
-            action: "regenerated",
-            metadata: [
-                "temperature": String(format: "%.1f", temperature),
-                "prompt_edited": editedPrompt != userPromptForRegeneration ? "yes" : "no"
-            ]
-        )
-        
+
         // Reset state
         messageToRegenerate = nil
         userPromptForRegeneration = ""
