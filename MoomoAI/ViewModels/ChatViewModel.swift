@@ -244,7 +244,7 @@ class ChatViewModel: ObservableObject {
 
             // Persist locally in the background.
             Task.detached(priority: .utility) { [sessions] in
-                await PersistenceService.shared.saveSessions(sessions)
+                PersistenceService.shared.saveSessions(sessions)
             }
         }
     }
