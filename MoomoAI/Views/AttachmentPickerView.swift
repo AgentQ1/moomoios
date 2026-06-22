@@ -141,12 +141,19 @@ struct PhotoPickerView: UIViewControllerRepresentable {
             
             if let image = info[.originalImage] as? UIImage,
                let imageData = image.jpegData(compressionQuality: 0.8) {
+                let mimeType = "image/jpeg"
+                let name = "image_\(UUID().uuidString).jpg"
+                #if DEBUG
+                print("ATTACH_FILE name=\(name) mimeType=\(mimeType) source=photo")
+                #endif
                 let attachment = AttachmentItem(
                     id: UUID().uuidString,
                     type: .image,
-                    name: "image_\(UUID().uuidString).jpg",
+                    name: name,
                     data: imageData,
-                    thumbnail: image
+                    thumbnail: image,
+                    source: .photo,
+                    mimeType: mimeType
                 )
                 attachments.append(attachment)
             }
@@ -209,28 +216,42 @@ struct DocumentPickerView: UIViewControllerRepresentable {
             
             if let data = try? Data(contentsOf: url) {
                 let filename = url.lastPathComponent
+                let ext = url.pathExtension.lowercased()
                 let type: AttachmentType
-                
-                if url.pathExtension.lowercased() == "pdf" {
-                    type = .pdf
-                } else if ["doc", "docx", "txt", "rtf"].contains(url.pathExtension.lowercased()) {
-                    type = .document
-                } else if ["jpg", "jpeg", "png", "heic"].contains(url.pathExtension.lowercased()) {
+
+                // Images are supported first-class (jpg/jpeg/png/heic). Other types
+                // are carried through so the composer can show a friendly
+                // "not supported yet" message at send time.
+                if ["jpg", "jpeg", "png", "heic"].contains(ext) {
                     type = .image
-                } else if ["mp4", "mov", "m4v"].contains(url.pathExtension.lowercased()) {
+                } else if ext == "pdf" {
+                    type = .pdf
+                } else if ["doc", "docx", "txt", "rtf"].contains(ext) {
+                    type = .document
+                } else if ["mp4", "mov", "m4v"].contains(ext) {
                     type = .video
                 } else {
                     type = .other
                 }
-                
+
+                // Best-effort MIME type from the file's UTType, falling back by extension.
+                let mimeType = UTType(filenameExtension: ext)?.preferredMIMEType
+                    ?? (type == .image ? "image/\(ext == "jpg" ? "jpeg" : ext)" : "application/octet-stream")
+
+                #if DEBUG
+                print("ATTACH_FILE name=\(filename) mimeType=\(mimeType) source=file")
+                #endif
+
                 let attachment = AttachmentItem(
                     id: UUID().uuidString,
                     type: type,
                     name: filename,
                     data: data,
-                    thumbnail: nil
+                    thumbnail: type == .image ? UIImage(data: data) : nil,
+                    source: .file,
+                    mimeType: mimeType
                 )
-                
+
                 parent.onDocumentSelected(attachment)
             }
         }
@@ -265,15 +286,21 @@ struct CameraView: UIViewControllerRepresentable {
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
             if let image = info[.originalImage] as? UIImage,
                let data = image.jpegData(compressionQuality: 0.8) {
-                
+                let mimeType = "image/jpeg"
+                let name = "photo_\(Date().timeIntervalSince1970).jpg"
+                #if DEBUG
+                print("ATTACH_CAMERA name=\(name) mimeType=\(mimeType) source=camera")
+                #endif
                 let attachment = AttachmentItem(
                     id: UUID().uuidString,
                     type: .image,
-                    name: "photo_\(Date().timeIntervalSince1970).jpg",
+                    name: name,
                     data: data,
-                    thumbnail: image
+                    thumbnail: image,
+                    source: .camera,
+                    mimeType: mimeType
                 )
-                
+
                 parent.onImageCaptured(attachment)
             }
             
@@ -287,13 +314,26 @@ struct CameraView: UIViewControllerRepresentable {
 }
 
 // MARK: - Attachment Models
+
+/// Where an attachment came from — used for routing and debug logging.
+enum AttachmentSource: String {
+    case photo   // Photo Library
+    case camera  // Camera capture
+    case file    // Files / document picker
+}
+
 struct AttachmentItem: Identifiable {
     let id: String
     let type: AttachmentType
     let name: String
     let data: Data
     let thumbnail: UIImage?
-    
+    var source: AttachmentSource = .file
+    var mimeType: String = "application/octet-stream"
+
+    /// True when this attachment is an image we can send to the image-edit flow.
+    var isSupportedImage: Bool { type == .image }
+
     var sizeFormatted: String {
         let bytes = Double(data.count)
         if bytes < 1024 {

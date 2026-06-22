@@ -15,7 +15,7 @@ import UIKit
 
 struct ChatView: View {
     @EnvironmentObject var chatViewModel: ChatViewModel
-    @EnvironmentObject var authViewModel: AuthViewModel
+    @EnvironmentObject var authService: AuthService
     @Binding var showSidebar: Bool
     
     @State private var messageText = ""
@@ -23,10 +23,11 @@ struct ChatView: View {
     @State private var showCamera = false
     @State private var showDocumentPicker = false
     @State private var attachments: [AttachmentItem] = []
-    @State private var searchText = ""
-    @State private var showSearch = false
+    @State private var imageMode = false   // When true, the composer creates an image instead of chatting
+    @State private var showCameraDeniedAlert = false
+    @State private var cameraAlertMessage = ""
+    @State private var showUnsupportedFileAlert = false
     @FocusState private var isInputFocused: Bool
-    @FocusState private var isSearchFocused: Bool
     
     // Speech recognition
     @State private var isRecording = false
@@ -100,17 +101,33 @@ struct ChatView: View {
                 attachments.append(item)
             }
         }
+        .alert("Camera Unavailable", isPresented: $showCameraDeniedAlert) {
+            Button("OK", role: .cancel) { }
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                Button("Open Settings") { UIApplication.shared.open(url) }
+            }
+        } message: {
+            Text(cameraAlertMessage)
+        }
+        .alert("Unsupported File", isPresented: $showUnsupportedFileAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("This file type is not supported yet.")
+        }
         .onChange(of: chatViewModel.currentSession?.id) { _ in
             // Dismiss keyboard when switching to a new session
             isInputFocused = false
             messageText = ""
             attachments.removeAll()
+            imageMode = false
         }
         .onAppear {
             // Auto-focus the input field when the view appears
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 isInputFocused = true
             }
+            // Load the current conversation's history from the cloud on open.
+            Task { await chatViewModel.loadCurrentConversationFromCloud() }
         }
     }
     
@@ -172,11 +189,6 @@ struct ChatView: View {
                             if isInputFocused {
                                 isInputFocused = false
                             }
-                            // Clear search if active
-                            if showSearch {
-                                showSearch = false
-                                searchText = ""
-                            }
                         }
                     }) {
                         Image(systemName: "square.and.pencil")
@@ -188,31 +200,6 @@ struct ChatView: View {
             }
             .padding(.horizontal, 16)
             .frame(height: 56)
-            
-            // Search bar
-            if showSearch {
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(K.Colors.textSecondary)
-                    
-                    TextField("Search messages...", text: $searchText)
-                        .foregroundColor(K.Colors.textPrimary)
-                        .focused($isSearchFocused)
-                    
-                    if !searchText.isEmpty {
-                        Button(action: { searchText = "" }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(K.Colors.textSecondary)
-                        }
-                    }
-                }
-                .padding(10)
-                .background(K.Colors.backgroundSecondary)
-                .cornerRadius(10)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
         }
         .background(K.Colors.backgroundPrimary)
         .overlay(
@@ -266,7 +253,7 @@ struct ChatView: View {
             ScrollView {
                 // PERFORMANCE: Use LazyVStack with proper ID for efficient rendering
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    ForEach(filteredMessages(from: session), id: \.id) { message in
+                    ForEach(session.messages, id: \.id) { message in
                         MessageBubbleView(
                             message: message,
                             onReact: { emoji in
@@ -305,21 +292,14 @@ struct ChatView: View {
         }
     }
     
-    private func filteredMessages(from session: ChatSession) -> [ChatMessage] {
-        guard !searchText.isEmpty else { return session.messages }
-        return session.messages.filter { message in
-            message.content.localizedCaseInsensitiveContains(searchText)
-        }
-    }
-    
-    // MARK: - Input Area
+    // MARK: - Input Area (clean ChatGPT/Gemini-style composer)
     private var inputArea: some View {
         VStack(spacing: 0) {
-            
-            // Attachments preview - like web app
+
+            // Compact attachment preview (small thumbnail + remove button).
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         ForEach(attachments) { attachment in
                             AttachmentPreviewCard(attachment: attachment) {
                                 if let index = attachments.firstIndex(where: { $0.id == attachment.id }) {
@@ -329,91 +309,89 @@ struct ChatView: View {
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.top, 8)
                 }
-                .background(K.Colors.backgroundPrimary.opacity(0.5))
             }
-            
-            // Input Container - Text area on top, buttons at bottom
+
+            // Input container — text on top, controls below.
             VStack(spacing: 0) {
-                // Text input area - ONE LINE
-                ZStack(alignment: .leading) {
-                    // Placeholder text
-                    if messageText.isEmpty {
-                        Text(chatViewModel.currentSession?.isTemporary == true ? "Ask in a temporary chat" : "Ask me anything...")
-                            .font(.system(size: 17))
-                            .foregroundColor(K.Colors.textSecondary.opacity(0.6))
-                            .padding(.leading, 12)
-                            .allowsHitTesting(false)
+                // Text row. A small magic-wand icon appears (state only, no label)
+                // when Create-image mode is active; tap it to leave image mode.
+                HStack(alignment: .center, spacing: 8) {
+                    if imageMode {
+                        Button(action: { withAnimation { imageMode = false } }) {
+                            Image(systemName: "wand.and.stars")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(K.Colors.accentColor)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .padding(.leading, 12)
+                        .transition(.scale.combined(with: .opacity))
                     }
-                    
-                    if #available(iOS 16.0, *) {
-                        TextField("", text: $messageText, axis: .vertical)
-                            .font(.system(size: 17))
-                            .foregroundColor(K.Colors.textPrimary)
-                            .tint(K.Colors.accentColor)
-                            .focused($isInputFocused)
-                            .lineLimit(1...3)
-                            .padding(.horizontal, 12)
-                            .frame(minHeight: 36)
-                            .submitLabel(.send)
-                            .onSubmit {
-                                sendMessage()
-                            }
-                            .onTapGesture {
-                                isInputFocused = true
-                            }
-                    } else {
-                        TextField("", text: $messageText)
-                            .font(.system(size: 17))
-                            .foregroundColor(K.Colors.textPrimary)
-                            .tint(K.Colors.accentColor)
-                            .focused($isInputFocused)
-                            .padding(.horizontal, 12)
-                            .frame(height: 36)
-                            .onSubmit {
-                                sendMessage()
-                            }
-                            .onTapGesture {
-                                isInputFocused = true
-                            }
+
+                    ZStack(alignment: .leading) {
+                        if messageText.isEmpty {
+                            Text(composerPlaceholder)
+                                .font(.system(size: 17))
+                                .foregroundColor(K.Colors.textSecondary.opacity(0.6))
+                                .padding(.leading, 12)
+                                .allowsHitTesting(false)
+                        }
+
+                        if #available(iOS 16.0, *) {
+                            TextField("", text: $messageText, axis: .vertical)
+                                .font(.system(size: 17))
+                                .foregroundColor(K.Colors.textPrimary)
+                                .tint(K.Colors.accentColor)
+                                .focused($isInputFocused)
+                                .lineLimit(1...3)
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 36)
+                                .submitLabel(.send)
+                                .onSubmit { sendMessage() }
+                        } else {
+                            TextField("", text: $messageText)
+                                .font(.system(size: 17))
+                                .foregroundColor(K.Colors.textPrimary)
+                                .tint(K.Colors.accentColor)
+                                .focused($isInputFocused)
+                                .padding(.horizontal, 12)
+                                .frame(height: 36)
+                                .onSubmit { sendMessage() }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    isInputFocused = true
-                }
-                
-                // Bottom row - All buttons
+                .onTapGesture { isInputFocused = true }
+
+                // Bottom controls: Plus menu • Spacer • Mic • Send.
                 HStack(alignment: .center, spacing: 12) {
-                    // Plus button - directly open photo picker (like web app)
-                    Button(action: { showImagePicker = true }) {
+                    // Plus / attachment menu (Photo Library, Camera, Files, Create image).
+                    Menu {
+                        Button(action: { showImagePicker = true }) {
+                            Label("Photo Library", systemImage: "photo.on.rectangle")
+                        }
+                        Button(action: { openCamera() }) {
+                            Label("Camera", systemImage: "camera")
+                        }
+                        Button(action: { showDocumentPicker = true }) {
+                            Label("Files", systemImage: "doc")
+                        }
+                        Divider()
+                        Button(action: {
+                            withAnimation { imageMode = true }
+                            isInputFocused = true
+                        }) {
+                            Label("Create image", systemImage: "wand.and.stars")
+                        }
+                    } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 22, weight: .semibold))
                             .foregroundColor(K.Colors.textPrimary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    
-                    // Search toggle button
-                    Button(action: {
-                        withAnimation {
-                            showSearch.toggle()
-                            if showSearch {
-                                // Dismiss input keyboard before showing search
-                                isInputFocused = false
-                                isSearchFocused = true
-                            } else {
-                                searchText = ""
-                            }
-                        }
-                    }) {
-                        Image(systemName: showSearch ? "xmark.circle.fill" : "slider.horizontal.3")
-                            .font(.system(size: 22, weight: .regular))
-                            .foregroundColor(K.Colors.textPrimary)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    
+
                     Spacer()
 
                     // Mic button
@@ -429,20 +407,27 @@ struct ChatView: View {
                             .foregroundColor(isRecording ? .red : K.Colors.textPrimary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    
-                    // Send button
+
+                    // Send button — enabled when there is text OR an attachment, and no request is in flight.
                     Button(action: sendMessage) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 32, height: 32)
-                            .background(
-                                Circle()
-                                    .fill(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? K.Colors.textSecondary.opacity(0.3) : K.Colors.sendButton)
-                            )
+                        Group {
+                            if chatViewModel.isSending {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            } else {
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle()
+                                .fill(canSend ? K.Colors.sendButton : K.Colors.textSecondary.opacity(0.3))
+                        )
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canSend)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -450,48 +435,140 @@ struct ChatView: View {
             .background(K.Colors.inputBg)
             .overlay(
                 RoundedRectangle(cornerRadius: 22)
-                    .stroke(isInputFocused ? K.Colors.accentColor : K.Colors.borderColor, lineWidth: 1.5)
+                    .stroke(composerBorderColor, lineWidth: imageMode ? 2 : 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 22))
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
         .background(K.Colors.backgroundPrimary)
+        .animation(.easeInOut(duration: 0.2), value: imageMode)
+    }
+
+    /// Composer border turns purple in Create-image mode, or while focused.
+    private var composerBorderColor: Color {
+        if imageMode { return K.Colors.accentColor }
+        return isInputFocused ? K.Colors.accentColor : K.Colors.borderColor
     }
     
+    // MARK: - Composer Placeholder
+    private var composerPlaceholder: String {
+        if imageMode {
+            return "Describe an image..."
+        }
+        return chatViewModel.currentSession?.isTemporary == true ? "Ask in a temporary chat" : "Ask anything..."
+    }
+
+    // MARK: - Send Button State
+    private var canSend: Bool {
+        guard !chatViewModel.isSending else { return false }
+        return !messageText.trimmed.isEmpty || !attachments.isEmpty
+    }
+
+    private func clearComposer() {
+        messageText = ""
+        attachments.removeAll()
+        imageMode = false
+        isInputFocused = false
+    }
+
     // MARK: - Actions
     private func sendMessage() {
-        print("🔵 sendMessage called with text: '\(messageText)'")
-        guard !messageText.trimmed.isEmpty || !attachments.isEmpty else {
-            print("❌ Message empty, not sending")
+        // Duplicate-send guard: ignore repeated taps while a request is in flight.
+        guard !chatViewModel.isSending else {
+            #if DEBUG
+            print("CHAT_SEND blocked duplicate request")
+            #endif
             return
         }
-        
-        var message = messageText.trimmed
-        print("✅ Sending message: '\(message)'")
-        
-        // TODO: BACKEND INTEGRATION — attachment analytics removed in frontend-only reset.
 
-        // For images, pass attachment data
-        // Store attachments reference for the API call
-        let messageAttachments = attachments
-        
-        // If only attachments without text, add a prompt
-        if message.isEmpty && !attachments.isEmpty {
-            message = "What can you tell me about this?"
+        let prompt = messageText.trimmed
+
+        // Files flow: only image files are supported right now. A non-image
+        // attachment (PDF/doc/etc.) shows a friendly message instead of being
+        // silently dropped or misrouted into the image-edit flow.
+        if let unsupported = attachments.first(where: { !$0.isSupportedImage }) {
+            #if DEBUG
+            print("CHAT_SEND unsupportedFile name=\(unsupported.name) mimeType=\(unsupported.mimeType) source=\(unsupported.source.rawValue)")
+            #endif
+            attachments.removeAll { $0.id == unsupported.id }
+            showUnsupportedFileAlert = true
+            return
         }
-        
-        // Clear inputs
-        messageText = ""
-        let localAttachments = messageAttachments
-        attachments.removeAll()
-        isInputFocused = false
-        
-        // Haptic feedback for sending
+
+        // (3) An attached image (Photo Library / Camera / Files) + prompt always
+        // uses the image-EDIT flow — never generateImage.
+        if let imageAttachment = attachments.first(where: { $0.type == .image }) {
+            let instruction = prompt.isEmpty ? "Edit this image" : prompt
+            #if DEBUG
+            print("CHAT_SEND editImage name=\(imageAttachment.name) mimeType=\(imageAttachment.mimeType) source=\(imageAttachment.source.rawValue)")
+            #endif
+            clearComposer()
+            HapticFeedback.light()
+            Task {
+                await chatViewModel.sendImageEdit(prompt: instruction, attachment: imageAttachment)
+            }
+            return
+        }
+
+        // (2) Create-image mode with no attached input image -> text-to-image.
+        if imageMode {
+            guard !prompt.isEmpty else { return }
+            #if DEBUG
+            print("CHAT_SEND createImage")
+            #endif
+            clearComposer()
+            HapticFeedback.light()
+            Task {
+                await chatViewModel.sendImagePrompt(prompt)
+            }
+            return
+        }
+
+        // (1) Plain text -> normal chat with conversation history + memory.
+        guard !prompt.isEmpty else {
+            #if DEBUG
+            print("CHAT_SEND empty")
+            #endif
+            return
+        }
+        #if DEBUG
+        print("CHAT_SEND textOnly")
+        #endif
+        clearComposer()
         HapticFeedback.light()
-        
         Task {
-            await chatViewModel.sendMessage(message, attachments: localAttachments)
+            await chatViewModel.sendMessage(prompt)
+        }
+    }
+
+    // MARK: - Camera permission
+    /// Open the camera, handling the unavailable / denied cases with a friendly alert
+    /// instead of presenting a black screen.
+    private func openCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            cameraAlertMessage = "The camera isn't available on this device."
+            showCameraDeniedAlert = true
+            return
+        }
+
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            showCamera = true
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        showCamera = true
+                    } else {
+                        cameraAlertMessage = "Camera access is off. Enable it in Settings to take photos."
+                        showCameraDeniedAlert = true
+                    }
+                }
+            }
+        default:
+            cameraAlertMessage = "Camera access is off. Enable it in Settings to take photos."
+            showCameraDeniedAlert = true
         }
     }
     
@@ -610,14 +687,14 @@ struct AttachmentPreviewCard: View {
                     Image(uiImage: thumbnail)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 80, height: 80)
+                        .frame(width: 56, height: 56)
                         .clipped()
                         .cornerRadius(8)
                 } else if attachment.type == .pdf {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(K.Colors.backgroundSecondary)
-                            .frame(width: 80, height: 80)
+                            .frame(width: 56, height: 56)
                         
                         VStack(spacing: 4) {
                             Image(systemName: "doc.fill")
@@ -632,7 +709,7 @@ struct AttachmentPreviewCard: View {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(K.Colors.backgroundSecondary)
-                            .frame(width: 80, height: 80)
+                            .frame(width: 56, height: 56)
                         
                         VStack(spacing: 4) {
                             Image(systemName: attachment.type.icon)
@@ -672,7 +749,7 @@ struct ChatView_Previews: PreviewProvider {
     static var previews: some View {
         ChatView(showSidebar: .constant(false))
             .environmentObject(ChatViewModel())
-            .environmentObject(AuthViewModel())
+            .environmentObject(AuthService())
             .preferredColorScheme(.dark)
     }
 }

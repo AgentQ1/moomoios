@@ -18,12 +18,13 @@ class ChatViewModel: ObservableObject {
     @Published var sessions: [ChatSession] = []
     @Published var currentSession: ChatSession?
     @Published var isLoading = false
+    @Published var isSending = false   // True while any generation request is in flight (duplicate-send guard)
     @Published var selectedLanguage: Language = Language.defaultLanguage
     @Published var selectedModel: AIModel = .Q1 // Default to Q1
     @Published var errorMessage: String?
 
     private let persistence = PersistenceService.shared
-    private let modelAPI = MockAIService.shared
+    private let generation = GenerationService.shared
 
     init() {
         loadSessions()
@@ -54,6 +55,8 @@ class ChatViewModel: ObservableObject {
     func selectSession(_ session: ChatSession) {
         currentSession = session
         persistence.saveCurrentSessionId(session.id)
+        // Hydrate this conversation's messages from the cloud.
+        Task { await loadCurrentConversationFromCloud() }
     }
 
     func deleteSession(_ session: ChatSession) {
@@ -160,16 +163,24 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Message Handling
 
-    func sendMessage(_ messageText: String, attachments: [AttachmentItem] = []) async {
+    func sendMessage(_ messageText: String) async {
+        guard !isSending else { return }
         guard var session = currentSession else {
             return
         }
+        isSending = true
+        defer { isSending = false }
 
-        // Add user message (with thumbnail if image attached)
-        let thumbnailData: Data? = attachments.first(where: { $0.type == .image })?.thumbnailJPEGData(maxDimension: 300)
-        let userMessage = ChatMessage(role: .user, content: messageText, imageData: thumbnailData)
+        let conversationId = session.id
+        let isTemp = session.isTemporary
+
+        // Conversation history BEFORE this turn, for model context (last 20).
+        let history = recentHistory(from: session.messages)
+
+        let userMessage = ChatMessage(role: .user, content: messageText)
         session.addMessage(userMessage)
         updateSession(session)
+        persistMessage(conversationId: conversationId, title: session.title, message: userMessage, isTemporary: isTemp)
 
         // Show typing indicator
         isLoading = true
@@ -178,57 +189,192 @@ class ChatViewModel: ObservableObject {
         updateSession(session)
 
         do {
-            // Build system prompt with language
-            let systemPrompt = buildSystemPrompt()
+            // Include the user-memory summary only when memory is enabled.
+            let memoryText = MemoryService.shared.isMemoryEnabled
+                ? (await MemoryService.shared.loadMemory()?.contextText)
+                : nil
 
-            // Limit conversation history to last 20 messages (performance optimization)
-            let limitedMessages = Array(session.messages.dropLast().suffix(20))
-
-            // Get a placeholder response from the local mock service.
-            // TODO: BACKEND INTEGRATION — replace MockAIService with real generation.
-            let response = try await modelAPI.sendMessage(
-                model: selectedModel,
-                messages: limitedMessages,
-                systemPrompt: systemPrompt,
-                attachments: attachments
+            // Real generation via shared service (Cloud Functions + Gemini). The
+            // backend assembles the system instruction from language + memory.
+            let response = try await generation.generateText(
+                message: messageText,
+                history: history,
+                memory: memoryText,
+                language: selectedLanguage.name,
+                languageCode: selectedLanguage.code
             )
 
             // Remove typing indicator and add response
             session.messages.removeLast()
-            let assistantMessage = ChatMessage(role: .assistant, content: response)
+            let assistantMessage = ChatMessage(role: .assistant, content: response.text ?? "")
             session.addMessage(assistantMessage)
             updateSession(session)
+            persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+            scheduleMemoryUpdate(messages: session.messages, isTemporary: isTemp)
 
         } catch {
-            errorMessage = error.localizedDescription
-
-            // Remove typing indicator and show the actual error
-            session.messages.removeLast()
-            let errorContent: String
-            if let apiError = error as? ModelAPIError {
-                errorContent = "⚠️ \(apiError.localizedDescription)"
-            } else {
-                errorContent = "⚠️ \(error.localizedDescription)"
-            }
-            let errorMsg = ChatMessage(
-                role: .assistant,
-                content: errorContent
-            )
-            session.addMessage(errorMsg)
-            updateSession(session)
+            handleGenerationError(error, session: &session)
         }
 
         isLoading = false
     }
 
-    private func buildSystemPrompt() -> String {
-        let languageName = selectedLanguage.name
-
-        if selectedLanguage.code != "en" {
-            return "You are Moomo, an intelligent AI assistant. CRITICAL: The user has selected \(languageName) as their preferred language. You MUST respond entirely in \(languageName). Provide accurate, comprehensive, and well-structured responses. Never respond in English unless the user explicitly asks for translation."
-        } else {
-            return "You are Moomo, an intelligent AI assistant. Provide accurate, comprehensive, and well-structured responses. Be direct and to the point while remaining helpful and informative."
+    /// Generate an image from a prompt, inline in the current chat conversation.
+    /// Uses the existing `generateImage` Cloud Function via GenerationService.
+    func sendImagePrompt(_ promptText: String) async {
+        guard !isSending else { return }
+        guard var session = currentSession else {
+            return
         }
+        isSending = true
+        defer { isSending = false }
+
+        let conversationId = session.id
+        let isTemp = session.isTemporary
+
+        // Add the user's request as a normal user bubble.
+        let userMessage = ChatMessage(role: .user, content: promptText)
+        session.addMessage(userMessage)
+        updateSession(session)
+        persistMessage(conversationId: conversationId, title: session.title, message: userMessage, isTemporary: isTemp)
+
+        // Show typing indicator while the image is generated.
+        isLoading = true
+        let typingMessage = ChatMessage(role: .assistant, content: "", isTyping: true)
+        session.addMessage(typingMessage)
+        updateSession(session)
+
+        do {
+            let result = try await generation.generateImage(promptText)
+
+            // Remove typing indicator and add the image result as an assistant bubble.
+            session.messages.removeLast()
+            let assistantMessage = ChatMessage(
+                role: .assistant,
+                content: result.text ?? "",
+                imageURL: result.url
+            )
+            session.addMessage(assistantMessage)
+            updateSession(session)
+            persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+
+        } catch {
+            handleGenerationError(error, session: &session)
+        }
+
+        isLoading = false
+    }
+
+    /// Edit an attached/photo image using a text instruction, inline in chat.
+    /// Routes through the existing `editGeneratedImage` Cloud Function (NOT generateImage),
+    /// sending the attached image bytes alongside the prompt.
+    func sendImageEdit(prompt promptText: String, attachment: AttachmentItem) async {
+        guard !isSending else { return }
+        guard var session = currentSession else {
+            return
+        }
+        isSending = true
+        defer { isSending = false }
+
+        let conversationId = session.id
+        let isTemp = session.isTemporary
+
+        // User bubble shows the attached image thumbnail + the instruction.
+        let thumbnailData = attachment.thumbnailJPEGData(maxDimension: 300)
+        let userMessage = ChatMessage(role: .user, content: promptText, imageData: thumbnailData)
+        session.addMessage(userMessage)
+        updateSession(session)
+        persistMessage(conversationId: conversationId, title: session.title, message: userMessage, attachment: attachment, isTemporary: isTemp)
+
+        // Typing indicator while the edit runs.
+        isLoading = true
+        let typingMessage = ChatMessage(role: .assistant, content: "", isTyping: true)
+        session.addMessage(typingMessage)
+        updateSession(session)
+
+        do {
+            // Send a size-bounded JPEG of the attached image so the callable payload stays small.
+            let payload = attachment.thumbnailJPEGData(maxDimension: 1024) ?? attachment.data
+            let result = try await generation.editImage(imageData: payload, mimeType: "image/jpeg", instruction: promptText)
+
+            session.messages.removeLast()
+            let assistantMessage = ChatMessage(
+                role: .assistant,
+                content: result.text ?? "",
+                imageURL: result.url
+            )
+            session.addMessage(assistantMessage)
+            updateSession(session)
+            persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+
+        } catch {
+            handleGenerationError(error, session: &session)
+        }
+
+        isLoading = false
+    }
+
+    // MARK: - Cloud sync
+
+    /// Load the current conversation's messages from Firestore (on app open / when
+    /// switching conversations). Cloud wins when it has data; an empty result
+    /// (offline or brand-new chat) leaves the local copy untouched.
+    func loadCurrentConversationFromCloud() async {
+        guard var session = currentSession, !session.isTemporary else { return }
+        let cloud = await MemoryService.shared.loadMessages(conversationId: session.id)
+        guard !cloud.isEmpty else { return }
+        session.messages = cloud
+        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[index] = session
+        }
+        currentSession = session
+    }
+
+    // MARK: - Memory + history helpers
+
+    /// Recent messages mapped to `{role, text}`, oldest-first, capped at 20.
+    private func recentHistory(from messages: [ChatMessage]) -> [[String: String]] {
+        messages
+            .filter { !$0.isTyping && !$0.content.isEmpty }
+            .suffix(20)
+            .map { ["role": $0.role == .user ? "user" : "assistant", "text": $0.content] }
+    }
+
+    /// Persist one message to Firestore. Temporary chats are never stored.
+    private func persistMessage(conversationId: String, title: String, message: ChatMessage, attachment: AttachmentItem? = nil, isTemporary: Bool) {
+        guard !isTemporary else { return }
+        MemoryService.shared.saveMessage(conversationId: conversationId, conversationTitle: title, message: message, attachment: attachment)
+    }
+
+    /// Fold the latest exchange into the user-memory summary (server-side, best-effort).
+    private func scheduleMemoryUpdate(messages: [ChatMessage], isTemporary: Bool) {
+        guard MemoryService.shared.isMemoryEnabled, !isTemporary, !MemoryService.shared.isGuest else { return }
+        let history = recentHistory(from: messages)
+        guard !history.isEmpty else { return }
+        Task { await generation.updateMemory(history: history) }
+    }
+
+    // MARK: - Error handling
+
+    private func handleGenerationError(_ error: Error, session: inout ChatSession) {
+        #if DEBUG
+        print("CHAT_ERROR \(error)")
+        #endif
+        let text = friendlyErrorText(error)
+        errorMessage = text
+
+        if session.messages.last?.isTyping == true {
+            session.messages.removeLast()
+        }
+        session.addMessage(ChatMessage(role: .assistant, content: text))
+        updateSession(session)
+    }
+
+    private func friendlyErrorText(_ error: Error) -> String {
+        if let genError = error as? GenerationService.GenerationError {
+            return genError.errorDescription ?? "Something went wrong. Please try again."
+        }
+        return "Something went wrong. Please try again."
     }
 
     private func updateSession(_ session: ChatSession) {
