@@ -275,66 +275,6 @@ class ChatViewModel: ObservableObject {
         updateSession(session)
     }
 
-    func regenerateMessage(messageId: String, temperature: Double, editedPrompt: String) {
-        guard var session = currentSession else { return }
-
-        // Find the message to regenerate
-        guard let messageIndex = session.messages.firstIndex(where: { $0.id == messageId }) else { return }
-
-        // Create conversation history up to this point (excluding the message to regenerate)
-        let historyMessages = Array(session.messages[0..<messageIndex])
-
-        // Add a temporary loading message to replace the old one
-        session.messages[messageIndex] = ChatMessage(
-            id: messageId,
-            role: .assistant,
-            content: "",
-            isTyping: true
-        )
-        updateSession(session)
-
-        isLoading = true
-
-        Task {
-            do {
-                // Regenerate with the edited prompt
-                var regenMessages = historyMessages
-                regenMessages.append(ChatMessage(role: .user, content: editedPrompt))
-                let response = try await modelAPI.sendMessage(
-                    model: selectedModel,
-                    messages: regenMessages,
-                    systemPrompt: buildSystemPrompt()
-                )
-
-                // Update the message with the new response
-                if var updatedSession = currentSession {
-                    updatedSession.messages[messageIndex] = ChatMessage(
-                        id: messageId,
-                        role: .assistant,
-                        content: response
-                    )
-                    updateSession(updatedSession)
-                }
-
-                isLoading = false
-            } catch {
-                // Handle error
-                errorMessage = "Failed to regenerate: \(error.localizedDescription)"
-                isLoading = false
-
-                // Restore original message or show error
-                if var errorSession = currentSession {
-                    errorSession.messages[messageIndex] = ChatMessage(
-                        id: messageId,
-                        role: .assistant,
-                        content: "Failed to regenerate response. Please try again."
-                    )
-                    updateSession(errorSession)
-                }
-            }
-        }
-    }
-
     // MARK: - Language Selection
 
     func selectLanguage(_ language: Language) {

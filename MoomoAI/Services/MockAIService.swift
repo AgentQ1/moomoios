@@ -12,9 +12,8 @@
 
 import Foundation
 
-/// Available chat models surfaced in the UI.
-/// Kept here so the frontend (ModelSelectorView / ChatViewModel) keeps compiling
-/// after the backend model service was removed.
+/// Chat model identifier used by ChatViewModel/MockAIService.
+/// Kept minimal (single model) for the frontend-only shell.
 enum AIModel: String, CaseIterable {
     case Q1 = "Q1"
 

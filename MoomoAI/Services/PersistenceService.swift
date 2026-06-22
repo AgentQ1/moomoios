@@ -93,14 +93,4 @@ class PersistenceService {
     func clearCurrentSessionId() {
         UserDefaults.standard.removeObject(forKey: "current_session_id")
     }
-
-    // MARK: - AI Data Sharing Consent
-
-    func setAIDataSharingConsent(_ isAllowed: Bool) {
-        UserDefaults.standard.set(isAllowed, forKey: "ai_data_sharing_consent")
-    }
-
-    func hasAIDataSharingConsent() -> Bool {
-        return UserDefaults.standard.bool(forKey: "ai_data_sharing_consent")
-    }
 }

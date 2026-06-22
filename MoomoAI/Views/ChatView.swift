@@ -25,12 +25,6 @@ struct ChatView: View {
     @State private var attachments: [AttachmentItem] = []
     @State private var searchText = ""
     @State private var showSearch = false
-    @State private var showRegenerateOptions = false
-    @State private var messageToRegenerate: ChatMessage?
-    @State private var userPromptForRegeneration: String = ""
-    @State private var showAIDataConsent = false
-    @State private var pendingMessageAfterConsent: String?
-    @State private var pendingAttachmentsAfterConsent: [AttachmentItem] = []
     @FocusState private var isInputFocused: Bool
     @FocusState private var isSearchFocused: Bool
     
@@ -104,43 +98,6 @@ struct ChatView: View {
         .sheet(isPresented: $showCamera) {
             CameraView { item in
                 attachments.append(item)
-            }
-        }
-        .sheet(isPresented: $showRegenerateOptions) {
-            if let message = messageToRegenerate {
-                RegenerateOptionsView(
-                    originalMessage: message,
-                    userPrompt: userPromptForRegeneration,
-                    onRegenerate: { temperature, editedPrompt in
-                        handleRegenerateSubmit(
-                            messageId: message.id,
-                            temperature: temperature,
-                            editedPrompt: editedPrompt
-                        )
-                    }
-                )
-            }
-        }
-        .overlay {
-            if showAIDataConsent {
-                AIDataConsentView(
-                    isPresented: $showAIDataConsent,
-                    onAccept: {
-                        PersistenceService.shared.setAIDataSharingConsent(true)
-                        // Re-send the pending message
-                        if let pending = pendingMessageAfterConsent {
-                            messageText = pending
-                            attachments = pendingAttachmentsAfterConsent
-                            pendingMessageAfterConsent = nil
-                            pendingAttachmentsAfterConsent = []
-                            sendMessage()
-                        }
-                    },
-                    onDecline: {
-                        pendingMessageAfterConsent = nil
-                        pendingAttachmentsAfterConsent = []
-                    }
-                )
             }
         }
         .onChange(of: chatViewModel.currentSession?.id) { _ in
@@ -317,9 +274,6 @@ struct ChatView: View {
                             },
                             onDelete: {
                                 handleDeleteMessage(messageId: message.id)
-                            },
-                            onRegenerate: {
-                                handleRegenerate(message: message)
                             }
                         )
                         .id(message.id)
@@ -461,10 +415,7 @@ struct ChatView: View {
                     .buttonStyle(PlainButtonStyle())
                     
                     Spacer()
-                    
-                    // Model selector
-                    ModelSelectorView(selectedModel: $chatViewModel.selectedModel)
-                    
+
                     // Mic button
                     Button(action: {
                         if isRecording {
@@ -516,14 +467,6 @@ struct ChatView: View {
             return
         }
         
-        // Check AI data sharing consent before first message
-        if !PersistenceService.shared.hasAIDataSharingConsent() {
-            pendingMessageAfterConsent = messageText.trimmed
-            pendingAttachmentsAfterConsent = attachments
-            showAIDataConsent = true
-            return
-        }
-        
         var message = messageText.trimmed
         print("✅ Sending message: '\(message)'")
         
@@ -570,38 +513,7 @@ struct ChatView: View {
     private func handleDeleteMessage(messageId: String) {
         chatViewModel.deleteMessage(messageId: messageId)
     }
-    
-    private func handleRegenerate(message: ChatMessage) {
-        // Find the user message that preceded this AI response
-        if let session = chatViewModel.currentSession,
-           let messageIndex = session.messages.firstIndex(where: { $0.id == message.id }),
-           messageIndex > 0 {
-            let previousMessage = session.messages[messageIndex - 1]
-            userPromptForRegeneration = previousMessage.content
-        }
-        
-        messageToRegenerate = message
-        showRegenerateOptions = true
-        
-        // Haptic feedback
-        HapticFeedback.light()
-    }
-    
-    private func handleRegenerateSubmit(messageId: String, temperature: Double, editedPrompt: String) {
-        // Dismiss sheet first
-        showRegenerateOptions = false
-        
-        chatViewModel.regenerateMessage(
-            messageId: messageId,
-            temperature: temperature,
-            editedPrompt: editedPrompt
-        )
 
-        // Reset state
-        messageToRegenerate = nil
-        userPromptForRegeneration = ""
-    }
-    
     // MARK: - Speech Recognition
     private func startRecording() {
         // Request authorization

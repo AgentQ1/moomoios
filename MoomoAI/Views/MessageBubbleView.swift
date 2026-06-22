@@ -11,19 +11,17 @@ struct MessageBubbleView: View {
     let message: ChatMessage
     let onReact: ((String) -> Void)?
     let onDelete: (() -> Void)?
-    let onRegenerate: (() -> Void)?
-    
+
     @State private var showCopyButton = false
     @State private var showActions = false
     @State private var showShareSheet = false
     @State private var showCopyToast = false
     @State private var showFullScreenImage = false
     
-    init(message: ChatMessage, onReact: ((String) -> Void)? = nil, onDelete: (() -> Void)? = nil, onRegenerate: (() -> Void)? = nil) {
+    init(message: ChatMessage, onReact: ((String) -> Void)? = nil, onDelete: (() -> Void)? = nil) {
         self.message = message
         self.onReact = onReact
         self.onDelete = onDelete
-        self.onRegenerate = onRegenerate
     }
     
     var body: some View {
@@ -63,11 +61,6 @@ struct MessageBubbleView: View {
                                     Button(action: copyToClipboard) {
                                         Label("Copy", systemImage: "doc.on.doc")
                                     }
-                                    if message.role == .assistant && onRegenerate != nil {
-                                        Button(action: { onRegenerate?() }) {
-                                            Label("Regenerate", systemImage: "arrow.clockwise")
-                                        }
-                                    }
                                     if onDelete != nil {
                                         Button(role: .destructive, action: { onDelete?() }) {
                                             Label("Delete", systemImage: "trash")
@@ -81,35 +74,6 @@ struct MessageBubbleView: View {
                 Spacer()
             }
             .frame(maxWidth: 900) // Match webapp max width
-            
-            // Regenerate button for AI messages
-            if message.role == .assistant && !message.isTyping && onRegenerate != nil {
-                HStack(spacing: 8) {
-                    Button(action: copyToClipboard) {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 16))
-                            .foregroundColor(K.Colors.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(K.Colors.backgroundSecondary)
-                            .cornerRadius(6)
-                    }
-                    
-                    Button(action: { onRegenerate?() }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 16))
-                            .foregroundColor(K.Colors.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(K.Colors.backgroundSecondary)
-                            .cornerRadius(6)
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.top, 4)
-                .frame(maxWidth: 900)
-            }
         }
         .overlay(alignment: .top) {
             if showCopyToast {
@@ -213,7 +177,7 @@ struct MessageBubbleView: View {
         MessageBubbleView(message: ChatMessage(
             role: .assistant,
             content: "I'm doing great! How can I help you today?"
-        ), onRegenerate: {})
+        ))
         
         MessageBubbleView(message: ChatMessage(
             role: .assistant,
