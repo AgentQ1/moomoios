@@ -138,8 +138,9 @@ struct PhotoPickerView: UIViewControllerRepresentable {
         
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
             var attachments: [AttachmentItem] = []
-            
-            if let image = info[.originalImage] as? UIImage,
+
+            if let original = info[.originalImage] as? UIImage,
+               let image = Optional(original.downscaled(maxDimension: 2048)),
                let imageData = image.jpegData(compressionQuality: 0.8) {
                 let mimeType = "image/jpeg"
                 let name = "image_\(UUID().uuidString).jpg"
@@ -284,7 +285,8 @@ struct CameraView: UIViewControllerRepresentable {
         }
         
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-            if let image = info[.originalImage] as? UIImage,
+            if let original = info[.originalImage] as? UIImage,
+               let image = Optional(original.downscaled(maxDimension: 2048)),
                let data = image.jpegData(compressionQuality: 0.8) {
                 let mimeType = "image/jpeg"
                 let name = "photo_\(Date().timeIntervalSince1970).jpg"

@@ -248,16 +248,67 @@ class ChatViewModel: ObservableObject {
             let result = try await generation.generateImage(promptText)
 
             // Remove typing indicator and add the image result as an assistant bubble.
+            // The image keeps the originating prompt (caption) + Storage path so it
+            // can be previewed, re-edited, and indexed in the Library.
             session.messages.removeLast()
             let assistantMessage = ChatMessage(
                 role: .assistant,
                 content: result.text ?? "",
-                imageURL: result.url
+                imageURL: result.url,
+                imagePath: result.path,
+                prompt: promptText,
+                model: selectedModel.rawValue
             )
             session.addMessage(assistantMessage)
             updateSession(session)
             persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+            logImageAsset(assistantMessage, type: .generatedImage, prompt: promptText, conversation: session, isTemporary: isTemp)
 
+        } catch {
+            handleGenerationError(error, session: &session)
+        }
+
+        isLoading = false
+    }
+
+    /// Edit a previously generated image (follow-up like "make it darker") using
+    /// its Storage path, so the change refers to the right image in this thread.
+    func sendImageEdit(prompt promptText: String, targetPath: String, sourceCaption: String?) async {
+        guard !isSending else { return }
+        guard var session = currentSession else { return }
+        isSending = true
+        defer { isSending = false }
+
+        let conversationId = session.id
+        let isTemp = session.isTemporary
+
+        let userMessage = ChatMessage(role: .user, content: promptText)
+        session.addMessage(userMessage)
+        updateSession(session)
+        persistMessage(conversationId: conversationId, title: session.title, message: userMessage, isTemporary: isTemp)
+
+        isLoading = true
+        let typingMessage = ChatMessage(role: .assistant, content: "", isTyping: true)
+        session.addMessage(typingMessage)
+        updateSession(session)
+
+        do {
+            let result = try await generation.editImage(path: targetPath, instruction: promptText)
+            session.messages.removeLast()
+            // Caption carries forward the edit lineage so the image stays self-describing.
+            let caption = sourceCaption.map { "\($0) · \(promptText)" } ?? promptText
+            let assistantMessage = ChatMessage(
+                role: .assistant,
+                content: result.text ?? "",
+                imageURL: result.url,
+                imagePath: result.path,
+                prompt: caption,
+                model: selectedModel.rawValue
+            )
+            session.addMessage(assistantMessage)
+            updateSession(session)
+            persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+            logImageAsset(assistantMessage, type: .editedImage, prompt: caption, conversation: session, isTemporary: isTemp)
         } catch {
             handleGenerationError(error, session: &session)
         }
@@ -301,17 +352,115 @@ class ChatViewModel: ObservableObject {
             let assistantMessage = ChatMessage(
                 role: .assistant,
                 content: result.text ?? "",
-                imageURL: result.url
+                imageURL: result.url,
+                imagePath: result.path,
+                prompt: promptText,
+                model: selectedModel.rawValue
             )
             session.addMessage(assistantMessage)
             updateSession(session)
             persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+            logImageAsset(assistantMessage, type: .editedImage, prompt: promptText, conversation: session, isTemporary: isTemp)
 
         } catch {
             handleGenerationError(error, session: &session)
         }
 
         isLoading = false
+    }
+
+    /// Ask a question about an attached document. Text is extracted on-device by
+    /// DocumentProcessor and included alongside the question so the model can
+    /// answer; the file itself is never uploaded. The document is indexed in the
+    /// Library and the user can keep asking follow-up questions in this thread.
+    func sendDocumentPrompt(question: String, document: ExtractedDocument, attachment: AttachmentItem) async {
+        guard !isSending else { return }
+        guard var session = currentSession else { return }
+        isSending = true
+        defer { isSending = false }
+
+        let conversationId = session.id
+        let isTemp = session.isTemporary
+        let trimmedQuestion = question.isEmpty ? "Summarize this document." : question
+
+        // User bubble shows the document chip + the question.
+        let userMessage = ChatMessage(
+            role: .user,
+            content: trimmedQuestion,
+            attachmentName: attachment.name,
+            attachmentMime: attachment.mimeType
+        )
+        session.addMessage(userMessage)
+        updateSession(session)
+        persistMessage(conversationId: conversationId, title: session.title, message: userMessage, attachment: attachment, isTemporary: isTemp)
+        logFileAsset(messageId: userMessage.id, attachment: attachment, prompt: trimmedQuestion, conversation: session, isTemporary: isTemp)
+
+        isLoading = true
+        let typingMessage = ChatMessage(role: .assistant, content: "", isTyping: true)
+        session.addMessage(typingMessage)
+        updateSession(session)
+
+        do {
+            let history = recentHistory(from: session.messages)
+            let memoryText = MemoryService.shared.isMemoryEnabled
+                ? (await MemoryService.shared.loadMemory()?.contextText)
+                : nil
+
+            // Compose a single message that gives the model the document context.
+            var composed = "The user attached a document named \"\(attachment.name)\"."
+            if document.truncated { composed += " (Showing the first part of a longer document.)" }
+            composed += "\n\n--- DOCUMENT CONTENT ---\n\(document.text)\n--- END DOCUMENT ---\n\nUser question: \(trimmedQuestion)"
+
+            let response = try await generation.generateText(
+                message: composed,
+                history: history,
+                memory: memoryText,
+                language: selectedLanguage.name,
+                languageCode: selectedLanguage.code
+            )
+
+            session.messages.removeLast()
+            let assistantMessage = ChatMessage(role: .assistant, content: response.text ?? "", model: selectedModel.rawValue)
+            session.addMessage(assistantMessage)
+            updateSession(session)
+            persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+            scheduleMemoryUpdate(messages: session.messages, isTemporary: isTemp)
+        } catch {
+            handleGenerationError(error, session: &session)
+        }
+
+        isLoading = false
+    }
+
+    // MARK: - Asset logging
+
+    /// Record a generated/edited image in the Library index (best-effort).
+    private func logImageAsset(_ message: ChatMessage, type: AssetType, prompt: String, conversation: ChatSession, isTemporary: Bool) {
+        guard !isTemporary, let url = message.imageURL else { return }
+        AssetLibraryService.shared.saveAsset(LibraryAsset(
+            type: type,
+            url: url,
+            path: message.imagePath,
+            prompt: prompt,
+            chatId: conversation.id,
+            chatTitle: conversation.title,
+            messageId: message.id,
+            model: message.model
+        ))
+    }
+
+    /// Record an uploaded file in the Library index (metadata only — no binary).
+    private func logFileAsset(messageId: String, attachment: AttachmentItem, prompt: String, conversation: ChatSession, isTemporary: Bool) {
+        guard !isTemporary else { return }
+        AssetLibraryService.shared.saveAsset(LibraryAsset(
+            type: .uploadedFile,
+            prompt: prompt,
+            chatId: conversation.id,
+            chatTitle: conversation.title,
+            messageId: messageId,
+            mimeType: attachment.mimeType,
+            name: attachment.name
+        ))
     }
 
     // MARK: - Cloud sync
@@ -328,6 +477,44 @@ class ChatViewModel: ObservableObject {
             sessions[index] = session
         }
         currentSession = session
+    }
+
+    /// Merge the cloud conversation list into local sessions so chats reappear
+    /// after logging in (including on a fresh device). Local sessions are kept;
+    /// cloud-only conversations are added as metadata and hydrated lazily on open.
+    func syncConversationsFromCloud() async {
+        let cloud = await MemoryService.shared.loadConversations()
+        guard !cloud.isEmpty else { return }
+        let existingIds = Set(sessions.map { $0.id })
+        var merged = sessions
+        for convo in cloud where !existingIds.contains(convo.id) {
+            merged.append(convo)
+        }
+        sessions = merged.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        persistence.saveSessions(sessions.filter { !$0.isTemporary })
+    }
+
+    // MARK: - Auth lifecycle
+
+    /// Called when a user signs in. Hydrates their chat list from the cloud.
+    func handleSignIn() {
+        Task {
+            await syncConversationsFromCloud()
+            if currentSession == nil { createNewSession() }
+        }
+    }
+
+    /// Called on sign-out. Clears the previous user's in-memory + local state so
+    /// the next session never restores stale chats from another account.
+    func handleSignOut() {
+        sessions = []
+        currentSession = nil
+        persistence.clearAllSessions()
+        persistence.clearCurrentSessionId()
+        createNewSession()
     }
 
     // MARK: - Memory + history helpers

@@ -9,7 +9,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject var chatViewModel: ChatViewModel
-    @EnvironmentObject var authViewModel: AuthViewModel
+    @EnvironmentObject var authService: AuthService
     @Binding var showSidebar: Bool
     @Binding var showLanguageSelection: Bool
     
@@ -374,7 +374,7 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 
                 // Sign in / Profile button
-                if let user = authViewModel.currentUser {
+                if let user = authService.currentUser {
                     Button(action: { 
                         HapticFeedback.light()
                         showProfileMenu = true 
@@ -438,9 +438,7 @@ struct SidebarView: View {
                     // Sign in with Google
                     Button(action: {
                         HapticFeedback.medium()
-                        Task {
-                            await authViewModel.signInWithEmail()
-                        }
+                        authService.signInWithGoogle()
                     }) {
                         HStack(spacing: 10) {
                             Image(systemName: "g.circle.fill")
@@ -600,7 +598,7 @@ struct SidebarView_Previews: PreviewProvider {
             showLanguageSelection: .constant(false)
         )
         .environmentObject(ChatViewModel())
-        .environmentObject(AuthViewModel())
+        .environmentObject(AuthService())
         .preferredColorScheme(.dark)
     }
 }

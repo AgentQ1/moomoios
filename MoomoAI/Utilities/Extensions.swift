@@ -6,79 +6,66 @@
 //
 
 import SwiftUI
-
-// MARK: - View Extensions
-extension View {
-    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
-        clipShape(RoundedCorner(radius: radius, corners: corners))
-    }
-}
-
-struct RoundedCorner: Shape {
-    var radius: CGFloat = .infinity
-    var corners: UIRectCorner = .allCorners
-
-    func path(in rect: CGRect) -> Path {
-        let path = UIBezierPath(
-            roundedRect: rect,
-            byRoundingCorners: corners,
-            cornerRadii: CGSize(width: radius, height: radius)
-        )
-        return Path(path.cgPath)
-    }
-}
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - String Extensions
 extension String {
     var trimmed: String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    
+
     func containsIgnoringCase(_ other: String) -> Bool {
         self.lowercased().contains(other.lowercased())
     }
 }
 
-// MARK: - Date Extensions
-extension Date {
-    var timeAgo: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: self, relativeTo: Date())
-    }
-    
-    var formatted: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: self)
+// MARK: - Shimmer (loading skeletons)
+
+private struct ShimmerModifier: ViewModifier {
+    @State private var animating = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(animating ? 0.4 : 0.85)
+            .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: animating)
+            .onAppear { animating = true }
     }
 }
 
-// MARK: - Color Extensions
+extension View {
+    /// A subtle pulsing effect used on placeholder cells while content loads.
+    func shimmer() -> some View { modifier(ShimmerModifier()) }
+}
+
+// MARK: - Color hex
+
 extension Color {
+    /// Create a Color from a hex string like "#FAF8F5" or "FAF8F5".
     init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
-        switch hex.count {
-        case 3: // RGB (12-bit)
-            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-        case 6: // RGB (24-bit)
-            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8: // ARGB (32-bit)
-            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default:
-            (a, r, g, b) = (255, 0, 0, 0)
-        }
-
-        self.init(
-            .sRGB,
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue: Double(b) / 255,
-            opacity: Double(a) / 255
-        )
+        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        var value: UInt64 = 0
+        Scanner(string: cleaned).scanHexInt64(&value)
+        let r = Double((value & 0xFF0000) >> 16) / 255.0
+        let g = Double((value & 0x00FF00) >> 8) / 255.0
+        let b = Double(value & 0x0000FF) / 255.0
+        self.init(red: r, green: g, blue: b)
     }
 }
+
+// MARK: - UIImage downscaling (compress large uploads)
+
+#if canImport(UIKit)
+extension UIImage {
+    /// Returns a copy scaled so its longest side is at most `maxDimension`.
+    /// Caps the resolution of large photos before they enter the upload pipeline.
+    func downscaled(maxDimension: CGFloat) -> UIImage {
+        let longestSide = max(size.width, size.height)
+        guard longestSide > maxDimension, longestSide > 0 else { return self }
+        let scale = maxDimension / longestSide
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in draw(in: CGRect(origin: .zero, size: newSize)) }
+    }
+}
+#endif

@@ -1,0 +1,15 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Generated images live under generations/{uid}/...
+    // Users may read their own images; all writes go through Cloud Functions
+    // (Admin SDK), so clients are never allowed to write directly.
+    match /generations/{uid}/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

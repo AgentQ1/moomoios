@@ -24,17 +24,45 @@ class PersistenceService {
         persistenceQueue.async {
             // Limit sessions to prevent storage issues
             let limitedSessions = Array(sessions.prefix(self.maxSessions))
-            
-            if let encoded = try? JSONEncoder().encode(limitedSessions) {
+
+            // PERFORMANCE: Offload attached-image thumbnails to the on-disk cache and
+            // strip them from the JSON kept in UserDefaults. This keeps launch fast and
+            // avoids bloating UserDefaults (which is loaded fully into memory) with
+            // base64 image data on every message update.
+            let lightweight: [ChatSession] = limitedSessions.map { session in
+                var session = session
+                session.messages = session.messages.map { message in
+                    guard let data = message.imageData else { return message }
+                    if !ImageCache.shared.hasThumbnail(id: message.id) {
+                        ImageCache.shared.storeThumbnail(data, id: message.id)
+                    }
+                    var message = message
+                    message.imageData = nil
+                    return message
+                }
+                return session
+            }
+
+            if let encoded = try? JSONEncoder().encode(lightweight) {
                 UserDefaults.standard.set(encoded, forKey: "chat_sessions")
             }
         }
     }
-    
+
     func loadSessions() -> [ChatSession] {
         guard let data = UserDefaults.standard.data(forKey: "chat_sessions"),
-              let sessions = try? JSONDecoder().decode([ChatSession].self, from: data) else {
+              var sessions = try? JSONDecoder().decode([ChatSession].self, from: data) else {
             return []
+        }
+        // Rehydrate attached-image thumbnails from the on-disk cache.
+        for index in sessions.indices {
+            sessions[index].messages = sessions[index].messages.map { message in
+                guard message.imageData == nil,
+                      let data = ImageCache.shared.loadThumbnail(id: message.id) else { return message }
+                var message = message
+                message.imageData = data
+                return message
+            }
         }
         return sessions
     }

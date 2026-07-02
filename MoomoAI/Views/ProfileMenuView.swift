@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ProfileMenuView: View {
-    @EnvironmentObject var authViewModel: AuthViewModel
+    @EnvironmentObject var authService: AuthService
     @EnvironmentObject var chatViewModel: ChatViewModel
     @Environment(\.dismiss) var dismiss
     
@@ -20,7 +20,7 @@ struct ProfileMenuView: View {
     var body: some View {
         NavigationView {
             List {
-                if let user = authViewModel.currentUser {
+                if let user = authService.currentUser {
                     // User info section
                     Section {
                         HStack(spacing: 12) {
@@ -95,6 +95,15 @@ struct ProfileMenuView: View {
                         }
                     }
                     
+                    // Personalization & Memory
+                    Section {
+                        NavigationLink {
+                            SettingsView()
+                        } label: {
+                            Label("Personalization & Memory", systemImage: "brain.head.profile")
+                        }
+                    }
+
                     // Privacy section
                     Section("Privacy") {
                         Link(destination: URL(string: "https://moomopro-72876.web.app/privacy-policy.html")!) {
@@ -116,7 +125,7 @@ struct ProfileMenuView: View {
                         }
                         
                         Button(action: {
-                            authViewModel.signOut()
+                            authService.signOut()
                             dismiss()
                         }) {
                             Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
@@ -160,11 +169,11 @@ struct ProfileMenuView: View {
                 Button("Cancel", role: .cancel) { }
                 Button("Delete", role: .destructive) {
                     Task {
-                        let success = await authViewModel.deleteAccount()
+                        let success = await authService.deleteAccount()
                         if success {
                             dismiss()
                         } else {
-                            deletionErrorMessage = authViewModel.errorMessage ?? "Unknown error occurred"
+                            deletionErrorMessage = authService.errorMessage ?? "Unknown error occurred"
                             showDeletionError = true
                         }
                     }
@@ -184,7 +193,7 @@ struct ProfileMenuView: View {
 struct ProfileMenuView_Previews: PreviewProvider {
     static var previews: some View {
         ProfileMenuView()
-            .environmentObject(AuthViewModel())
+            .environmentObject(AuthService())
             .environmentObject(ChatViewModel())
             .preferredColorScheme(.dark)
     }

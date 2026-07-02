@@ -2,66 +2,62 @@
 //  ContentView.swift
 //  MoomoAI
 //
-//  Main content view with sidebar and chat interface.
-//
-//  TODO: BACKEND INTEGRATION — Firebase session sync and the post-login AI data
-//  consent flow were removed during the frontend-only reset. The app opens
-//  directly into the main UI (AuthViewModel auto-provisions a local mock user).
+//  Root view: gates on auth, then opens directly into the chat experience.
+//  Image and text generation both happen inline in the chat composer
+//  (ChatGPT/Gemini style) — there is no separate Create tab.
 //
 
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var authViewModel: AuthViewModel
+    @EnvironmentObject var authService: AuthService
     @EnvironmentObject var chatViewModel: ChatViewModel
     @State private var showSidebar = false
     @State private var showLanguageSelection = false
 
     var body: some View {
         Group {
-            if authViewModel.isSignedIn {
-                // Main app — shown immediately in the frontend-only shell.
-                mainAppView
+            if authService.isSignedIn {
+                chatRoot
             } else {
-                // Welcome screen (reachable only after an explicit sign-out).
                 LoginView()
+            }
+        }
+        // Luxury warm-white canvas is a fixed light theme app-wide.
+        .preferredColorScheme(.light)
+        // Reset transient UI on every auth transition so a fresh login always
+        // opens to the home chat with the sidebar closed (no stale drawer state),
+        // and a new user never inherits the previous account's chats.
+        .onChange(of: authService.isSignedIn) { signedIn in
+            showSidebar = false
+            showLanguageSelection = false
+            if signedIn {
+                chatViewModel.handleSignIn()
+            } else {
+                chatViewModel.handleSignOut()
             }
         }
     }
 
-    // MARK: - Main App View
+    // MARK: - Chat Root (chat shell + full-screen sidebar overlay)
 
-    private var mainAppView: some View {
+    private var chatRoot: some View {
         ZStack {
             // Main Chat Area
             ChatView(showSidebar: $showSidebar)
 
-            // Sidebar overlay (shown when showSidebar is true)
+            // Full-screen, Gemini-style navigation drawer.
             if showSidebar {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation {
-                            showSidebar = false
-                        }
-                    }
-
-                GeometryReader { geometry in
-                    HStack(spacing: 0) {
-                        SidebarView(
-                            showSidebar: $showSidebar,
-                            showLanguageSelection: $showLanguageSelection
-                        )
-                        .frame(width: min(geometry.size.width * 0.85, 320))
-                        .transition(.move(edge: .leading))
-
-                        Spacer()
-                    }
-                }
-                .ignoresSafeArea(edges: .vertical)
+                FullScreenSidebarView(
+                    showSidebar: $showSidebar,
+                    showLanguageSelection: $showLanguageSelection
+                )
+                .transition(.move(edge: .leading))
+                .zIndex(2)
             }
         }
-        .accentColor(Color("AccentColor"))
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showSidebar)
+        .accentColor(K.Colors.accentColor)
         .sheet(isPresented: $showLanguageSelection) {
             LanguageSelectionView()
         }
@@ -71,8 +67,8 @@ struct ContentView: View {
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
-            .environmentObject(AuthViewModel())
+            .environmentObject(AuthService())
             .environmentObject(ChatViewModel())
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(.light)
     }
 }

@@ -24,9 +24,12 @@ struct ChatView: View {
     @State private var showDocumentPicker = false
     @State private var attachments: [AttachmentItem] = []
     @State private var imageMode = false   // When true, the composer creates an image instead of chatting
+    @State private var editingImage: EditingImageTarget?  // Non-nil while editing a previously generated image
     @State private var showCameraDeniedAlert = false
     @State private var cameraAlertMessage = ""
     @State private var showUnsupportedFileAlert = false
+    @State private var unsupportedFileMessage = "This file type is not supported yet."
+    @State private var isProcessingDocument = false
     @FocusState private var isInputFocused: Bool
     
     // Speech recognition
@@ -53,9 +56,7 @@ struct ChatView: View {
                             }
                         }
                 } else if session.messages.isEmpty {
-                    WelcomeView(onSuggestionTap: { suggestion in
-                        handleWelcomeSuggestion(suggestion)
-                    })
+                    WelcomeView()
                     .contentShape(Rectangle())
                     .onTapGesture {
                         // Dismiss keyboard when tapping empty welcome area
@@ -77,7 +78,7 @@ struct ChatView: View {
             // Input Area
             inputArea
         }
-        .background(K.Colors.backgroundPrimary)
+        .background(LuxuryBackground())
         .navigationBarHidden(true)
         .sheet(isPresented: $showImagePicker) {
             if #available(iOS 16.0, *) {
@@ -109,10 +110,10 @@ struct ChatView: View {
         } message: {
             Text(cameraAlertMessage)
         }
-        .alert("Unsupported File", isPresented: $showUnsupportedFileAlert) {
+        .alert("Can’t use this file", isPresented: $showUnsupportedFileAlert) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("This file type is not supported yet.")
+            Text(unsupportedFileMessage)
         }
         .onChange(of: chatViewModel.currentSession?.id) { _ in
             // Dismiss keyboard when switching to a new session
@@ -120,6 +121,7 @@ struct ChatView: View {
             messageText = ""
             attachments.removeAll()
             imageMode = false
+            editingImage = nil
         }
         .onAppear {
             // Auto-focus the input field when the view appears
@@ -131,83 +133,53 @@ struct ChatView: View {
         }
     }
     
+    /// True while the current conversation has no messages yet — the empty
+    /// "home" state that shows the full Moomo brand cluster in the header.
+    private var isHomeState: Bool {
+        chatViewModel.currentSession?.messages.isEmpty ?? true
+    }
+
     // MARK: - Chat Header
     private var chatHeader: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button(action: { 
-                    withAnimation { 
-                        showSidebar.toggle()
-                        // Dismiss keyboard when opening sidebar
-                        if showSidebar && isInputFocused {
-                            isInputFocused = false
-                        }
+        HStack(alignment: .center, spacing: 8) {
+            // Hamburger — opens the navigation drawer.
+            Button(action: {
+                withAnimation {
+                    showSidebar.toggle()
+                    if showSidebar && isInputFocused {
+                        isInputFocused = false
                     }
-                }) {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 22))
-                        .foregroundColor(K.Colors.textPrimary)
-                        .padding(8)
                 }
-                
-                Spacer()
-                
-                Text(chatViewModel.currentSession?.isTemporary == true ? "Temporary chat" : "Moomo AI Assistant")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(K.Colors.textPrimary)
-                
-                Spacer()
-                
-                // Temporary chat toggle
-                Button(action: {
-                    withAnimation {
-                        if chatViewModel.currentSession?.isTemporary == true {
-                            // Exit temporary mode — go back to last regular session or create new
-                            if let lastRegular = chatViewModel.sessions.first {
-                                chatViewModel.selectSession(lastRegular)
-                            } else {
-                                chatViewModel.createNewSession()
-                            }
-                        } else {
-                            chatViewModel.createTemporarySession()
-                        }
-                        if isInputFocused { isInputFocused = false }
-                    }
-                }) {
-                    Image(systemName: chatViewModel.currentSession?.isTemporary == true ? "viewfinder" : "viewfinder")
-                        .font(.system(size: 20))
-                        .foregroundColor(chatViewModel.currentSession?.isTemporary == true ? K.Colors.accentColor : K.Colors.textPrimary)
-                        .padding(8)
-                }
-                
-                // New Chat button (visible after first query)
-                if let session = chatViewModel.currentSession, !session.messages.isEmpty {
-                    Button(action: {
-                        withAnimation {
-                            chatViewModel.createNewSession()
-                            // Dismiss keyboard when creating new chat
-                            if isInputFocused {
-                                isInputFocused = false
-                            }
-                        }
-                    }) {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 22))
-                            .foregroundColor(K.Colors.textPrimary)
-                            .padding(8)
-                    }
+            }) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundColor(K.Colors.ink.opacity(0.85))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 8)
+
+            // Center: full Moomo brand on the empty home, "LAB AI" once chatting.
+            if isHomeState {
+                MoomoBrandHeader()
+            } else {
+                LabAIHeader()
+            }
+
+            Spacer(minLength: 8)
+
+            // Top-right sparkle button — starts a fresh chat.
+            SparkleCircleButton {
+                withAnimation {
+                    chatViewModel.createNewSession()
+                    if isInputFocused { isInputFocused = false }
                 }
             }
-            .padding(.horizontal, 16)
-            .frame(height: 56)
         }
-        .background(K.Colors.backgroundPrimary)
-        .overlay(
-            Rectangle()
-                .fill(Color.white.opacity(0.1))
-                .frame(height: 0.5),
-            alignment: .bottom
-        )
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
     }
     
     // MARK: - Temporary Chat Welcome (Gemini-style)
@@ -219,12 +191,12 @@ struct ChatView: View {
                 // Viewfinder icon in a circle
                 ZStack {
                     Circle()
-                        .fill(K.Colors.textSecondary.opacity(0.1))
+                        .fill(K.Colors.gold.opacity(0.12))
                         .frame(width: 64, height: 64)
-                    
+
                     Image(systemName: "viewfinder")
                         .font(.system(size: 28, weight: .light))
-                        .foregroundColor(K.Colors.textSecondary)
+                        .foregroundColor(K.Colors.gold)
                 }
                 
                 // Title
@@ -261,6 +233,12 @@ struct ChatView: View {
                             },
                             onDelete: {
                                 handleDeleteMessage(messageId: message.id)
+                            },
+                            onEditImage: { msg in
+                                startEditingImage(msg)
+                            },
+                            onRegenerate: {
+                                regenerate(after: message, in: session)
                             }
                         )
                         .id(message.id)
@@ -296,6 +274,33 @@ struct ChatView: View {
     private var inputArea: some View {
         VStack(spacing: 0) {
 
+            // "Editing image" context chip — follow-up prompts target this image.
+            if let editing = editingImage {
+                HStack(spacing: 8) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(K.Colors.accentColor)
+                    Text(editing.caption.map { "Editing: \($0)" } ?? "Editing image")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(K.Colors.textPrimary)
+                        .lineLimit(1)
+                    Spacer()
+                    Button(action: { withAnimation { editingImage = nil } }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(K.Colors.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(K.Colors.accentColor.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             // Compact attachment preview (small thumbnail + remove button).
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -313,50 +318,46 @@ struct ChatView: View {
                 }
             }
 
-            // Input container — text on top, controls below.
-            VStack(spacing: 0) {
+            // Input container — large rounded white card: text on top, controls below.
+            VStack(alignment: .leading, spacing: 16) {
                 // Text row. A small magic-wand icon appears (state only, no label)
                 // when Create-image mode is active; tap it to leave image mode.
-                HStack(alignment: .center, spacing: 8) {
+                HStack(alignment: .center, spacing: 10) {
                     if imageMode {
                         Button(action: { withAnimation { imageMode = false } }) {
                             Image(systemName: "wand.and.stars")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(K.Colors.accentColor)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(K.Colors.gold)
                         }
                         .buttonStyle(PlainButtonStyle())
-                        .padding(.leading, 12)
                         .transition(.scale.combined(with: .opacity))
                     }
 
                     ZStack(alignment: .leading) {
                         if messageText.isEmpty {
                             Text(composerPlaceholder)
-                                .font(.system(size: 17))
-                                .foregroundColor(K.Colors.textSecondary.opacity(0.6))
-                                .padding(.leading, 12)
+                                .font(.system(size: 18))
+                                .foregroundColor(K.Colors.textSecondary)
                                 .allowsHitTesting(false)
                         }
 
                         if #available(iOS 16.0, *) {
                             TextField("", text: $messageText, axis: .vertical)
-                                .font(.system(size: 17))
-                                .foregroundColor(K.Colors.textPrimary)
-                                .tint(K.Colors.accentColor)
+                                .font(.system(size: 18))
+                                .foregroundColor(K.Colors.ink)
+                                .tint(K.Colors.navy)
                                 .focused($isInputFocused)
-                                .lineLimit(1...3)
-                                .padding(.horizontal, 12)
-                                .frame(minHeight: 36)
+                                .lineLimit(1...4)
+                                .frame(minHeight: 28)
                                 .submitLabel(.send)
                                 .onSubmit { sendMessage() }
                         } else {
                             TextField("", text: $messageText)
-                                .font(.system(size: 17))
-                                .foregroundColor(K.Colors.textPrimary)
-                                .tint(K.Colors.accentColor)
+                                .font(.system(size: 18))
+                                .foregroundColor(K.Colors.ink)
+                                .tint(K.Colors.navy)
                                 .focused($isInputFocused)
-                                .padding(.horizontal, 12)
-                                .frame(height: 36)
+                                .frame(height: 28)
                                 .onSubmit { sendMessage() }
                         }
                     }
@@ -365,8 +366,8 @@ struct ChatView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { isInputFocused = true }
 
-                // Bottom controls: Plus menu • Spacer • Mic • Send.
-                HStack(alignment: .center, spacing: 12) {
+                // Bottom controls: Plus • Image • Mic on the left, Send on the right.
+                HStack(alignment: .center, spacing: 22) {
                     // Plus / attachment menu (Photo Library, Camera, Files, Create image).
                     Menu {
                         Button(action: { showImagePicker = true }) {
@@ -387,14 +388,20 @@ struct ChatView: View {
                         }
                     } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundColor(K.Colors.textPrimary)
+                            .font(.system(size: 22, weight: .regular))
+                            .foregroundColor(K.Colors.gold)
                     }
                     .buttonStyle(PlainButtonStyle())
 
-                    Spacer()
+                    // Image — jump straight to the photo library.
+                    Button(action: { showImagePicker = true }) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 21, weight: .regular))
+                            .foregroundColor(K.Colors.textSecondary)
+                    }
+                    .buttonStyle(PlainButtonStyle())
 
-                    // Mic button
+                    // Mic — dictation.
                     Button(action: {
                         if isRecording {
                             stopRecording()
@@ -402,66 +409,71 @@ struct ChatView: View {
                             startRecording()
                         }
                     }) {
-                        Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundColor(isRecording ? .red : K.Colors.textPrimary)
+                        Image(systemName: isRecording ? "stop.circle.fill" : "mic")
+                            .font(.system(size: 21, weight: .regular))
+                            .foregroundColor(isRecording ? .red : K.Colors.textSecondary)
                     }
                     .buttonStyle(PlainButtonStyle())
 
-                    // Send button — enabled when there is text OR an attachment, and no request is in flight.
+                    Spacer()
+
+                    // Send button — navy circle, enabled when there is text OR an attachment.
                     Button(action: sendMessage) {
                         Group {
-                            if chatViewModel.isSending {
+                            if chatViewModel.isSending || isProcessingDocument {
                                 ProgressView()
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             } else {
                                 Image(systemName: "arrow.up")
-                                    .font(.system(size: 16, weight: .bold))
+                                    .font(.system(size: 19, weight: .semibold))
                                     .foregroundColor(.white)
                             }
                         }
-                        .frame(width: 32, height: 32)
-                        .background(
-                            Circle()
-                                .fill(canSend ? K.Colors.sendButton : K.Colors.textSecondary.opacity(0.3))
-                        )
+                        .frame(width: 50, height: 50)
+                        .background(Circle().fill(K.Colors.navy))
                     }
                     .buttonStyle(PlainButtonStyle())
                     .disabled(!canSend)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
             }
-            .background(K.Colors.inputBg)
-            .overlay(
-                RoundedRectangle(cornerRadius: 22)
-                    .stroke(composerBorderColor, lineWidth: imageMode ? 2 : 1.5)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+            .background(
+                RoundedRectangle(cornerRadius: K.Layout.composerCornerRadius, style: .continuous)
+                    .fill(Color.white)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: K.Layout.composerCornerRadius, style: .continuous)
+                    .stroke(composerBorderColor, lineWidth: imageMode ? 1.5 : 1)
+            )
+            .shadow(color: K.Colors.navy.opacity(0.06), radius: 18, x: 0, y: 8)
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
         }
-        .background(K.Colors.backgroundPrimary)
+        .background(Color.clear)
         .animation(.easeInOut(duration: 0.2), value: imageMode)
     }
 
-    /// Composer border turns purple in Create-image mode, or while focused.
+    /// Composer keeps a soft gold hairline, deepening to gold on focus and navy in
+    /// Create-image mode.
     private var composerBorderColor: Color {
-        if imageMode { return K.Colors.accentColor }
-        return isInputFocused ? K.Colors.accentColor : K.Colors.borderColor
+        if imageMode { return K.Colors.navy }
+        return isInputFocused ? K.Colors.gold : K.Colors.goldSoft.opacity(0.7)
     }
     
     // MARK: - Composer Placeholder
     private var composerPlaceholder: String {
-        if imageMode {
-            return "Describe an image..."
-        }
+        if editingImage != nil { return "Describe your change…" }
+        if imageMode { return "Describe an image..." }
+        if attachments.contains(where: { !$0.isSupportedImage }) { return "Ask about this document…" }
         return chatViewModel.currentSession?.isTemporary == true ? "Ask in a temporary chat" : "Ask anything..."
     }
 
     // MARK: - Send Button State
     private var canSend: Bool {
-        guard !chatViewModel.isSending else { return false }
+        guard !chatViewModel.isSending, !isProcessingDocument else { return false }
+        if editingImage != nil { return !messageText.trimmed.isEmpty }
         return !messageText.trimmed.isEmpty || !attachments.isEmpty
     }
 
@@ -469,13 +481,26 @@ struct ChatView: View {
         messageText = ""
         attachments.removeAll()
         imageMode = false
+        editingImage = nil
         isInputFocused = false
+    }
+
+    /// Enter "edit this image" mode for a previously generated image.
+    private func startEditingImage(_ message: ChatMessage) {
+        guard let path = message.imagePath, !path.isEmpty else { return }
+        withAnimation {
+            editingImage = EditingImageTarget(path: path, caption: message.prompt)
+            imageMode = false
+            attachments.removeAll()
+        }
+        HapticFeedback.light()
+        isInputFocused = true
     }
 
     // MARK: - Actions
     private func sendMessage() {
         // Duplicate-send guard: ignore repeated taps while a request is in flight.
-        guard !chatViewModel.isSending else {
+        guard !chatViewModel.isSending, !isProcessingDocument else {
             #if DEBUG
             print("CHAT_SEND blocked duplicate request")
             #endif
@@ -484,61 +509,83 @@ struct ChatView: View {
 
         let prompt = messageText.trimmed
 
-        // Files flow: only image files are supported right now. A non-image
-        // attachment (PDF/doc/etc.) shows a friendly message instead of being
-        // silently dropped or misrouted into the image-edit flow.
-        if let unsupported = attachments.first(where: { !$0.isSupportedImage }) {
+        // (0) Editing a previously generated image -> edit by Storage path.
+        if let target = editingImage {
+            guard !prompt.isEmpty else { return }
+            let caption = target.caption
+            let path = target.path
+            clearComposer()
+            HapticFeedback.light()
+            Task { await chatViewModel.sendImageEdit(prompt: prompt, targetPath: path, sourceCaption: caption) }
+            return
+        }
+
+        // (1) An attached image (Photo Library / Camera / Files) + prompt always
+        // uses the image-EDIT flow — never generateImage.
+        if let imageAttachment = attachments.first(where: { $0.type == .image }) {
+            let instruction = prompt.isEmpty ? "Edit this image" : prompt
+            clearComposer()
+            HapticFeedback.light()
+            Task { await chatViewModel.sendImageEdit(prompt: instruction, attachment: imageAttachment) }
+            return
+        }
+
+        // (2) An attached document (PDF / txt / doc) -> extract text and ask about it.
+        if let document = attachments.first(where: { !$0.isSupportedImage }) {
+            handleDocumentSend(document, question: prompt)
+            return
+        }
+
+        // (3) Create-image mode with no attached input image -> text-to-image.
+        if imageMode {
+            guard !prompt.isEmpty else { return }
+            clearComposer()
+            HapticFeedback.light()
+            Task { await chatViewModel.sendImagePrompt(prompt) }
+            return
+        }
+
+        // (4) Plain text -> normal chat with conversation history + memory.
+        guard !prompt.isEmpty else { return }
+        clearComposer()
+        HapticFeedback.light()
+        Task { await chatViewModel.sendMessage(prompt) }
+    }
+
+    /// Extract text from an attached document off the main thread, then ask the AI
+    /// about it. Genuinely unsupported / unreadable files surface a clear error —
+    /// they are never silently dropped.
+    private func handleDocumentSend(_ document: AttachmentItem, question: String) {
+        guard DocumentProcessor.isSupported(fileName: document.name, mimeType: document.mimeType) else {
             #if DEBUG
-            print("CHAT_SEND unsupportedFile name=\(unsupported.name) mimeType=\(unsupported.mimeType) source=\(unsupported.source.rawValue)")
+            print("CHAT_SEND unsupportedFile name=\(document.name) mimeType=\(document.mimeType)")
             #endif
-            attachments.removeAll { $0.id == unsupported.id }
+            attachments.removeAll { $0.id == document.id }
+            unsupportedFileMessage = "“\(document.name)” isn’t a supported document type yet. Try a PDF or text file."
             showUnsupportedFileAlert = true
             return
         }
 
-        // (3) An attached image (Photo Library / Camera / Files) + prompt always
-        // uses the image-EDIT flow — never generateImage.
-        if let imageAttachment = attachments.first(where: { $0.type == .image }) {
-            let instruction = prompt.isEmpty ? "Edit this image" : prompt
-            #if DEBUG
-            print("CHAT_SEND editImage name=\(imageAttachment.name) mimeType=\(imageAttachment.mimeType) source=\(imageAttachment.source.rawValue)")
-            #endif
-            clearComposer()
-            HapticFeedback.light()
-            Task {
-                await chatViewModel.sendImageEdit(prompt: instruction, attachment: imageAttachment)
-            }
-            return
-        }
-
-        // (2) Create-image mode with no attached input image -> text-to-image.
-        if imageMode {
-            guard !prompt.isEmpty else { return }
-            #if DEBUG
-            print("CHAT_SEND createImage")
-            #endif
-            clearComposer()
-            HapticFeedback.light()
-            Task {
-                await chatViewModel.sendImagePrompt(prompt)
-            }
-            return
-        }
-
-        // (1) Plain text -> normal chat with conversation history + memory.
-        guard !prompt.isEmpty else {
-            #if DEBUG
-            print("CHAT_SEND empty")
-            #endif
-            return
-        }
-        #if DEBUG
-        print("CHAT_SEND textOnly")
-        #endif
+        let data = document.data
+        let name = document.name
+        let mime = document.mimeType
         clearComposer()
         HapticFeedback.light()
-        Task {
-            await chatViewModel.sendMessage(prompt)
+        isProcessingDocument = true
+
+        Task { @MainActor in
+            do {
+                // Extraction is CPU work — run it off the main thread.
+                let extracted = try await Task.detached(priority: .userInitiated) {
+                    try DocumentProcessor.extractText(from: data, fileName: name, mimeType: mime)
+                }.value
+                isProcessingDocument = false
+                await chatViewModel.sendDocumentPrompt(question: question, document: extracted, attachment: document)
+            } catch {
+                isProcessingDocument = false
+                unsupportedFileMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn’t read this document."
+                showUnsupportedFileAlert = true
+            }
         }
     }
 
@@ -572,12 +619,6 @@ struct ChatView: View {
         }
     }
     
-    private func handleWelcomeSuggestion(_ suggestion: String) {
-        // Send the tapped suggestion to the AI as a regular chat message
-        messageText = suggestion
-        sendMessage()
-    }
-
     // MARK: - Message Actions
     
     private func handleReaction(messageId: String, emoji: String) {
@@ -589,6 +630,18 @@ struct ChatView: View {
     
     private func handleDeleteMessage(messageId: String) {
         chatViewModel.deleteMessage(messageId: messageId)
+    }
+
+    /// Regenerate an assistant reply by re-sending the user prompt that preceded it.
+    private func regenerate(after assistantMessage: ChatMessage, in session: ChatSession) {
+        guard !chatViewModel.isSending, !isProcessingDocument else { return }
+        guard let idx = session.messages.firstIndex(where: { $0.id == assistantMessage.id }) else { return }
+        let precedingPrompt = session.messages[..<idx]
+            .last(where: { $0.role == .user && !$0.content.trimmed.isEmpty })?
+            .content.trimmed
+        guard let prompt = precedingPrompt, !prompt.isEmpty else { return }
+        HapticFeedback.light()
+        Task { await chatViewModel.sendMessage(prompt) }
     }
 
     // MARK: - Speech Recognition
@@ -675,6 +728,16 @@ struct ChatView: View {
     }
 }
 
+// MARK: - Editing Image Target
+
+/// Identifies a previously generated image the composer is currently editing, so
+/// follow-up prompts ("make it darker") apply to the right image in this thread.
+struct EditingImageTarget: Identifiable {
+    let id = UUID()
+    let path: String
+    let caption: String?
+}
+
 // MARK: - Attachment Preview Card (Web App Style)
 struct AttachmentPreviewCard: View {
     let attachment: AttachmentItem
@@ -750,6 +813,6 @@ struct ChatView_Previews: PreviewProvider {
         ChatView(showSidebar: .constant(false))
             .environmentObject(ChatViewModel())
             .environmentObject(AuthService())
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(.light)
     }
 }

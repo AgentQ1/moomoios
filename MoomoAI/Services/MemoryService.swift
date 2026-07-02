@@ -74,6 +74,9 @@ final class MemoryService {
             "createdAt": FieldValue.serverTimestamp(),
         ]
         if let url = message.imageURL { data["imageURL"] = url }
+        if let path = message.imagePath { data["imagePath"] = path }
+        if let prompt = message.prompt { data["prompt"] = prompt }
+        if let model = message.model { data["model"] = model }
         if let attachment {
             data["attachment"] = [
                 "name": attachment.name,
@@ -98,35 +101,81 @@ final class MemoryService {
         }
     }
 
-    /// Load all messages for a conversation, oldest first.
-    func loadMessages(conversationId: String) async -> [ChatMessage] {
+    /// Load the most recent messages for a conversation, oldest first. Bounded by
+    /// `limit` so very long chats don't load hundreds of documents on open
+    /// (older turns stay available server-side and the rolling memory summary
+    /// preserves their context).
+    func loadMessages(conversationId: String, limit: Int = 80) async -> [ChatMessage] {
         guard let uid else { return [] }
         do {
+            // Fetch newest-first + limited, then reverse to chronological order.
             let snapshot = try await db.collection("users").document(uid)
                 .collection("conversations").document(conversationId)
                 .collection("messages")
-                .order(by: "createdAt")
+                .order(by: "createdAt", descending: true)
+                .limit(to: limit)
                 .getDocuments()
 
-            return snapshot.documents.compactMap { doc -> ChatMessage? in
-                let d = doc.data()
-                guard let roleString = d["role"] as? String else { return nil }
-                let role: ChatMessage.MessageRole = (roleString == "user") ? .user : .assistant
-                let createdAt = (d["createdAt"] as? Timestamp)?.dateValue() ?? Date()
-                return ChatMessage(
-                    id: doc.documentID,
-                    role: role,
-                    content: d["text"] as? String ?? "",
-                    timestamp: createdAt,
-                    imageURL: d["imageURL"] as? String
-                )
-            }
+            return snapshot.documents.reversed().compactMap(Self.message(from:))
         } catch {
             #if DEBUG
             print("MEMORY loadMessages error=\(error.localizedDescription)")
             #endif
             return []
         }
+    }
+
+    /// Load the conversation list (metadata only, no messages) so chats reappear
+    /// after logging in on a fresh device. Messages are hydrated lazily when a
+    /// conversation is opened.
+    func loadConversations(limit: Int = 50) async -> [ChatSession] {
+        guard let uid else { return [] }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("conversations")
+                .order(by: "updatedAt", descending: true)
+                .limit(to: limit)
+                .getDocuments()
+
+            return snapshot.documents.compactMap { doc -> ChatSession? in
+                let d = doc.data()
+                let title = d["title"] as? String ?? "Chat"
+                let updatedAt = (d["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+                return ChatSession(
+                    id: doc.documentID,
+                    title: title,
+                    messages: [],
+                    createdAt: updatedAt,
+                    updatedAt: updatedAt
+                )
+            }
+        } catch {
+            #if DEBUG
+            print("MEMORY loadConversations error=\(error.localizedDescription)")
+            #endif
+            return []
+        }
+    }
+
+    /// Map a Firestore message document back into a ChatMessage.
+    private static func message(from doc: QueryDocumentSnapshot) -> ChatMessage? {
+        let d = doc.data()
+        guard let roleString = d["role"] as? String else { return nil }
+        let role: ChatMessage.MessageRole = (roleString == "user") ? .user : .assistant
+        let createdAt = (d["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+        let attachment = d["attachment"] as? [String: Any]
+        return ChatMessage(
+            id: doc.documentID,
+            role: role,
+            content: d["text"] as? String ?? "",
+            timestamp: createdAt,
+            imageURL: d["imageURL"] as? String,
+            imagePath: d["imagePath"] as? String,
+            prompt: d["prompt"] as? String,
+            model: d["model"] as? String,
+            attachmentName: attachment?["name"] as? String,
+            attachmentMime: attachment?["mimeType"] as? String
+        )
     }
 
     // MARK: - User memory / profile

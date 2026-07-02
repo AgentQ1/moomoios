@@ -2,118 +2,69 @@
 //  Constants.swift
 //  MoomoAI
 //
-//  App-wide constants - EXACT match to webapp with Dark/Light mode support
+//  App-wide constants — luxury "warm white + navy + gold" design system.
+//  Colors are a fixed, deliberately branded light canvas (no dark-mode variants);
+//  the app pins itself to light mode so the palette always renders as designed.
 //
 
 import SwiftUI
 
-// MARK: - Adaptive Color Extension
-private extension Color {
-    /// Creates an adaptive color that responds to light/dark mode
-    init(light: Color, dark: Color) {
-        #if canImport(UIKit)
-        self.init(UIColor { traitCollection in
-            switch traitCollection.userInterfaceStyle {
-            case .light, .unspecified:
-                return UIColor(light)
-            case .dark:
-                return UIColor(dark)
-            @unknown default:
-                return UIColor(dark)
-            }
-        })
-        #else
-        self = dark
-        #endif
-    }
-}
-
 struct K {
-    // MARK: - Colors (Adaptive Dark/Light mode - matches webapp exactly)
+    // MARK: - Colors (Luxury warm-white + navy + gold)
     struct Colors {
+        // MARK: - Brand palette (semantic anchors)
+        /// Warm white canvas.
+        static let cream = Color(hex: "F7F4EE")
+        /// Deep navy — send button, primary interactive ink.
+        static let navy = Color(hex: "16233F")
+        /// Royal navy — user message text.
+        static let navyText = Color(hex: "27407C")
+        /// Near-black navy — assistant body text.
+        static let ink = Color(hex: "1B2333")
+        /// Brand gold — "LAB AI", sparkles, accents.
+        static let gold = Color(hex: "C2A878")
+        /// Softer gold for hairlines and glows.
+        static let goldSoft = Color(hex: "D8C6A6")
+        /// Royal blue — "Moomo" wordmark on the chat home.
+        static let royalBlue = Color(hex: "2A3E86")
+        /// Royal purple — "Moomo" wordmark on the welcome screen.
+        static let royalPurple = Color(hex: "432874")
+        /// Blue-grey — timestamps and read receipts.
+        static let slate = Color(hex: "8C93A3")
+
         // MARK: - Backgrounds
-        /// Primary background: Dark: #1a1a1a, Light: #ffffff
-        static let backgroundPrimary = Color(
-            light: Color(red: 1.0, green: 1.0, blue: 1.0),
-            dark: Color(red: 0x1a/255.0, green: 0x1a/255.0, blue: 0x1a/255.0)
-        )
-        
-        /// Secondary background: Dark: #1e1e1e, Light: #f5f5f5
-        static let backgroundSecondary = Color(
-            light: Color(red: 0xf5/255.0, green: 0xf5/255.0, blue: 0xf5/255.0),
-            dark: Color(red: 0x1e/255.0, green: 0x1e/255.0, blue: 0x1e/255.0)
-        )
-        
-        /// Tertiary background: Dark: #242424, Light: #f0f0f0
-        static let backgroundTertiary = Color(
-            light: Color(red: 0xf0/255.0, green: 0xf0/255.0, blue: 0xf0/255.0),
-            dark: Color(red: 0x24/255.0, green: 0x24/255.0, blue: 0x24/255.0)
-        )
-        
-        /// Hover background: Dark: #2a2a2a, Light: #e8e8e8
-        static let backgroundHover = Color(
-            light: Color(red: 0xe8/255.0, green: 0xe8/255.0, blue: 0xe8/255.0),
-            dark: Color(red: 0x2a/255.0, green: 0x2a/255.0, blue: 0x2a/255.0)
-        )
-        
-        /// Active background: Dark: #323232, Light: #e0e0e0
-        static let backgroundActive = Color(
-            light: Color(red: 0xe0/255.0, green: 0xe0/255.0, blue: 0xe0/255.0),
-            dark: Color(red: 0x32/255.0, green: 0x32/255.0, blue: 0x32/255.0)
-        )
-        
+        static let backgroundPrimary = cream
+        static let backgroundSecondary = Color(hex: "F1ECE1")
+        static let backgroundTertiary = Color(hex: "EEE8DC")
+        static let backgroundHover = Color(hex: "E9E2D3")
+        static let backgroundActive = Color(hex: "E2D9C8")
+
         // MARK: - Borders
-        /// Border color: Dark: #3a3a3a, Light: #d0d0d0
-        static let borderColor = Color(
-            light: Color(red: 0xd0/255.0, green: 0xd0/255.0, blue: 0xd0/255.0),
-            dark: Color(red: 0x3a/255.0, green: 0x3a/255.0, blue: 0x3a/255.0)
-        )
-        
+        static let borderColor = Color(hex: "ECE6DA")
+
         // MARK: - Text
-        /// Primary text: Dark: #e3e3e3, Light: #1a1a1a
-        static let textPrimary = Color(
-            light: Color(red: 0x1a/255.0, green: 0x1a/255.0, blue: 0x1a/255.0),
-            dark: Color(red: 0xe3/255.0, green: 0xe3/255.0, blue: 0xe3/255.0)
-        )
-        
-        /// Secondary text: Dark: #b8b8b8, Light: #666666
-        static let textSecondary = Color(
-            light: Color(red: 0x66/255.0, green: 0x66/255.0, blue: 0x66/255.0),
-            dark: Color(red: 0xb8/255.0, green: 0xb8/255.0, blue: 0xb8/255.0)
-        )
-        
-        // MARK: - Accent (same in both modes)
-        /// Accent color: #8B5CF6 (Moomo Violet)
-        static let accentColor = Color(red: 0x8B/255.0, green: 0x5C/255.0, blue: 0xF6/255.0)
-        
-        /// Accent hover: #A78BFA
-        static let accentHover = Color(red: 0xA7/255.0, green: 0x8B/255.0, blue: 0xFA/255.0)
-        
+        static let textPrimary = ink
+        /// Secondary text / placeholders / muted action icons.
+        static let textSecondary = Color(hex: "8E8B93")
+
+        // MARK: - Accent (app tint)
+        static let accentColor = navy
+        static let accentHover = Color(hex: "24386E")
+
         // MARK: - Message
-        /// Message background: Dark: #2a2a2a, Light: #f5f5f5
-        static let messageBg = Color(
-            light: Color(red: 0xf5/255.0, green: 0xf5/255.0, blue: 0xf5/255.0),
-            dark: Color(red: 0x2a/255.0, green: 0x2a/255.0, blue: 0x2a/255.0)
-        )
-        
-        /// Input background: Dark: #242424, Light: #ffffff
-        static let inputBg = Color(
-            light: Color(red: 1.0, green: 1.0, blue: 1.0),
-            dark: Color(red: 0x24/255.0, green: 0x24/255.0, blue: 0x24/255.0)
-        )
-        
+        static let messageBg = Color(hex: "F1ECE1")
+        /// Composer fill.
+        static let inputBg = Color.white
+
         // MARK: - Buttons
-        /// Send button: #7C3AED (Moomo Violet dark)
-        static let sendButton = Color(red: 0x7C/255.0, green: 0x3A/255.0, blue: 0xED/255.0)
-        
-        /// Send button hover: #6D28D9
-        static let sendButtonHover = Color(red: 0x6D/255.0, green: 0x28/255.0, blue: 0xD9/255.0)
-        
-        // MARK: - Logo (same in both modes - Moomo brand colors)
-        static let logoViolet = Color(red: 0x8B/255.0, green: 0x5C/255.0, blue: 0xF6/255.0)
-        static let logoRose = Color(red: 0xF4/255.0, green: 0x3F/255.0, blue: 0x5E/255.0)
-        static let logoAmber = Color(red: 0xF5/255.0, green: 0x9E/255.0, blue: 0x0B/255.0)
-        static let logoTeal = Color(red: 0x14/255.0, green: 0xB8/255.0, blue: 0xA6/255.0)
+        static let sendButton = navy
+        static let sendButtonHover = Color(hex: "0E1A30")
+
+        // MARK: - Logo tokens (kept for compatibility; now on-brand)
+        static let logoViolet = royalBlue
+        static let logoRose = gold
+        static let logoAmber = goldSoft
+        static let logoTeal = navy
     }
     
     // MARK: - Typography (Exact webapp font sizes & weights)
@@ -150,6 +101,7 @@ struct K {
         static let mediumCornerRadius: CGFloat = 8
         static let smallCornerRadius: CGFloat = 6
         static let largeCornerRadius: CGFloat = 16
+        static let composerCornerRadius: CGFloat = 28
         
         // Padding
         static let padding: CGFloat = 20
@@ -171,13 +123,6 @@ struct K {
         static let logoBarCornerRadius: CGFloat = 6
         static let logoBarSpacing: CGFloat = 6
         static let logoPadding: CGFloat = 12
-    }
-    
-    // MARK: - Animation (Exact webapp durations)
-    struct Animation {
-        static let defaultDuration: Double = 0.3
-        static let fastDuration: Double = 0.2
-        static let slideUpDuration: Double = 0.2
     }
     
     // MARK: - Suggestions (native chat prompts sent directly to the AI)

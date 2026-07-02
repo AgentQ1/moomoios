@@ -11,3 +11,20 @@ xcuserdata/
 
 # macOS
 *.swp
+
+# Secrets / env (never commit) — Gemini key lives only in Firebase Secret Manager
+.env
+.env.*
+*.env
+.runtimeconfig.json
+service-account*.json
+# Firebase iOS config (contains API key; keep out of public repo)
+GoogleService-Info.plist
+
+# Firebase Functions
+functions/node_modules/
+functions/lib/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+.firebase/

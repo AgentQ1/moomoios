@@ -2,30 +2,32 @@
 //  MoomoIOSApp.swift
 //  MoomoIOS
 //
-//  Native iOS Implementation of Moomo AI Assistant (frontend-only shell).
-//
-//  TODO: BACKEND INTEGRATION — Firebase configuration, Google Sign-In URL
-//  handling, and app-session analytics were removed during the frontend-only
-//  reset. Re-add backend bootstrapping here when rebuilding the backend.
+//  Native iOS implementation of Moomo AI Assistant.
 //
 
 import SwiftUI
+import FirebaseCore
+import GoogleSignIn
 
 @main
 struct MoomoIOSApp: App {
-    @StateObject private var authViewModel = AuthViewModel()
+    @StateObject private var authService = AuthService()
     @StateObject private var chatViewModel = ChatViewModel()
 
     init() {
-        // No backend initialization in the frontend-only shell.
+        FirebaseApp.configure()
         configureAppearance()
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(authViewModel)
+                .environmentObject(authService)
                 .environmentObject(chatViewModel)
+                .onOpenURL { url in
+                    // Lets Google Sign-In complete its OAuth callback.
+                    GIDSignIn.sharedInstance.handle(url)
+                }
         }
     }
 
@@ -33,8 +35,8 @@ struct MoomoIOSApp: App {
         // Configure navigation bar appearance
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor(named: "BackgroundPrimary")
-        appearance.titleTextAttributes = [.foregroundColor: UIColor(named: "TextPrimary") ?? .label]
+        appearance.backgroundColor = UIColor(K.Colors.backgroundPrimary)
+        appearance.titleTextAttributes = [.foregroundColor: UIColor(K.Colors.textPrimary)]
 
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
@@ -42,7 +44,7 @@ struct MoomoIOSApp: App {
         // Configure tab bar appearance
         let tabBarAppearance = UITabBarAppearance()
         tabBarAppearance.configureWithOpaqueBackground()
-        tabBarAppearance.backgroundColor = UIColor(named: "BackgroundSecondary")
+        tabBarAppearance.backgroundColor = UIColor(K.Colors.backgroundSecondary)
 
         UITabBar.appearance().standardAppearance = tabBarAppearance
         UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
