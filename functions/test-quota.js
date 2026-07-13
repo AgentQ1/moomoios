@@ -122,6 +122,9 @@ async function main() {
   ok("grace period keeps premium", entitlementIsActive({ isActive: true, revoked: false, expiresDateMs: Date.now() - 1000, graceUntilMs: Date.now() + 1000 }) === true);
   ok("revoked kills premium", entitlementIsActive({ isActive: true, revoked: true, expiresDateMs: Date.now() + 86400_000 }) === false);
   ok("missing doc is not premium", entitlementIsActive(undefined) === false);
+  ok("retired product ID never unlocks premium", entitlementIsActive({ isActive: true, revoked: false, productId: "com.moomo.io.premium.monthly", expiresDateMs: Date.now() + 86400_000 }) === false);
+  ok("current product ID unlocks premium", entitlementIsActive({ isActive: true, revoked: false, productId: "com.moomolab.moomo.premium.monthly", expiresDateMs: Date.now() + 86400_000 }) === true);
+  ok("transferred-away entitlement inactive despite valid dates", entitlementIsActive({ isActive: false, revoked: false, transferredTo: "other-uid", expiresDateMs: Date.now() + 86400_000 }) === false);
 
   const uid6 = "expired-user-1";
   await db.doc(`users/${uid6}/entitlements/premium`).set({
