@@ -1,9 +1,9 @@
 {
   "name": "moomoios-functions",
-  "description": "Cloud Functions for Moomo iOS — Gemini text/image generation (backend-only).",
+  "description": "Cloud Functions for Moomo iOS \u2014 Gemini text/image generation (backend-only).",
   "main": "lib/index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "scripts": {
     "build": "tsc",
@@ -20,5 +20,6 @@
   "devDependencies": {
     "typescript": "^5.6.0"
   },
-  "private": true
+  "private": true,
+  "version": "1.0.1"
 }
