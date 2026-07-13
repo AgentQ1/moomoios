@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import StoreKit
 
 struct SettingsView: View {
     // Shares the same UserDefaults key MemoryService reads from the ViewModel.
