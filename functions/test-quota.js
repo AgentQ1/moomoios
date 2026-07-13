@@ -107,7 +107,7 @@ async function main() {
   const uid5 = "premium-user-1";
   await db.doc(`users/${uid5}/entitlements/premium`).set({
     isActive: true, revoked: false, expiresDateMs: Date.now() + 86400_000,
-    productId: "com.moomo.io.premium.monthly",
+    productId: "com.moomolab.moomo.premium.monthly",
   });
   for (let i = 1; i <= FREE_DAILY_LIMIT + 2; i++) {
     await withQuota(uid5, `p-${i}`, genFor(uid5, `p-${i}`, i));

@@ -20,7 +20,7 @@ final class StoreService: ObservableObject {
 
     /// Auto-renewable monthly subscription configured in App Store Connect
     /// (subscription group "Moomo Premium", $4.99/month US).
-    static let monthlyProductID = "com.moomo.io.premium.monthly"
+    static let monthlyProductID = "com.moomolab.moomo.premium.monthly"
 
     /// Local mirror of the verified StoreKit entitlement. UI gating only —
     /// every AI request is re-checked server-side.

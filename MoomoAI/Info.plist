@@ -19,12 +19,12 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.230310360548-g5ioa441q1m337bbhdcfl0gsgc2v9c0d</string>
+				<string>com.googleusercontent.apps.230310360548-8ms03j8ihcqml5nsfqlvfdtth28bkm5k</string>
 			</array>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>1</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Moomo AI needs access to your camera to take photos and scan documents.</string>
 	<key>NSMicrophoneUsageDescription</key>

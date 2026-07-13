@@ -384,7 +384,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Moomo;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.moomo.io;
+				PRODUCT_BUNDLE_IDENTIFIER = com.moomolab.moomo;
 				PRODUCT_NAME = MoomoIOS;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -417,7 +417,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Moomo;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.moomo.io;
+				PRODUCT_BUNDLE_IDENTIFIER = com.moomolab.moomo;
 				PRODUCT_NAME = MoomoAI;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";

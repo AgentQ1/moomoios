@@ -60,7 +60,7 @@ History saved to Firestore `generations/{auto}`: `userId, prompt, type, output, 
   consuming. Query 11 is rejected with `resource-exhausted` +
   `details.moomoCode = "FREE_QUOTA_EXHAUSTED"` **before** the Gemini call —
   the app shows the Premium paywall and preserves the draft.
-- **Premium** (`com.moomo.io.premium.monthly`, $4.99/month): entitlement stored
+- **Premium** (`com.moomolab.moomo.premium.monthly`, $4.99/month): entitlement stored
   at `users/{uid}/entitlements/premium`, written ONLY from Apple-signed JWS
   payloads (`functions/src/appstore.ts`, verified against Apple root CAs in
   `functions/certs/`). Premium bypasses the free limit (invisible 500/day

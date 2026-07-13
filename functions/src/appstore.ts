@@ -27,9 +27,9 @@ import {
   JWSRenewalInfoDecodedPayload,
 } from "@apple/app-store-server-library";
 
-export const BUNDLE_ID = "com.moomo.io";
+export const BUNDLE_ID = "com.moomolab.moomo";
 /** Must match the auto-renewable product ID configured in App Store Connect. */
-export const MONTHLY_PRODUCT_ID = "com.moomo.io.premium.monthly";
+export const MONTHLY_PRODUCT_ID = "com.moomolab.moomo.premium.monthly";
 const ALLOWED_PRODUCT_IDS = new Set([MONTHLY_PRODUCT_ID]);
 
 /**
@@ -108,6 +108,15 @@ export interface PremiumEntitlementDoc {
  */
 export function entitlementIsActive(d: FirebaseFirestore.DocumentData | undefined): boolean {
   if (!d) return false;
+  // Entitlements written for a retired product (e.g. the deleted com.moomo.io
+  // app's subscription) never unlock the current app.
+  if (typeof d.productId === "string" && d.productId.length > 0 && !ALLOWED_PRODUCT_IDS.has(d.productId)) {
+    return false;
+  }
+  // The subscription moved to another Firebase account (account switch /
+  // restore under a different login). Dates alone would still read as active
+  // here, so the transfer marker must win.
+  if (typeof d.transferredTo === "string" && d.transferredTo.length > 0) return false;
   if (d.revoked === true) return false;
   const now = Date.now();
   if (typeof d.expiresDateMs === "number" && d.expiresDateMs > now) return true;
@@ -186,7 +195,9 @@ async function persistEntitlement(uid: string, doc: PremiumEntitlementDoc): Prom
       environment: doc.environment,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    tx.set(entitlementRef, { ...doc }, { merge: true });
+    // Clear any transfer marker left from a previous account switch — this
+    // account is the subscription's current home again.
+    tx.set(entitlementRef, { ...doc, transferredTo: admin.firestore.FieldValue.delete() }, { merge: true });
   });
 }
 
