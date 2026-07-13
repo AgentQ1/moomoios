@@ -237,51 +237,56 @@ private struct LibraryCell: View {
     let asset: LibraryAsset
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            if asset.type.isImage, let urlString = asset.url, let url = URL(string: urlString) {
-                CachedAsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    ZStack {
-                        Rectangle().fill(K.Colors.backgroundTertiary)
-                        ProgressView().tint(K.Colors.textSecondary)
-                    }
+        // Reserve a fixed square first, then draw the (possibly oversized)
+        // content inside it — scaledToFill alone would push the cell past its
+        // grid slot and overlap neighbors.
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay(cellContent)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(alignment: .bottomLeading) {
+                if asset.type == .editedImage {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(5)
+                        .background(Circle().fill(Color.black.opacity(0.45)))
+                        .padding(6)
                 }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(1, contentMode: .fill)
-                .clipped()
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: asset.type.systemImage)
-                        .font(.system(size: 26))
-                        .foregroundColor(K.Colors.accentColor)
-                    Text(asset.name ?? asset.type.title)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(K.Colors.textSecondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 6)
-                }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(1, contentMode: .fill)
-                .background(K.Colors.backgroundTertiary)
             }
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(K.Colors.borderColor.opacity(0.3), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+    }
 
-            // Type badge
-            if asset.type == .editedImage {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(5)
-                    .background(Circle().fill(Color.black.opacity(0.45)))
-                    .padding(6)
+    @ViewBuilder
+    private var cellContent: some View {
+        if asset.type.isImage, let urlString = asset.url, let url = URL(string: urlString) {
+            CachedAsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                ZStack {
+                    Rectangle().fill(K.Colors.backgroundTertiary)
+                    ProgressView().tint(K.Colors.textSecondary)
+                }
             }
+        } else {
+            VStack(spacing: 8) {
+                Image(systemName: asset.type.systemImage)
+                    .font(.system(size: 26))
+                    .foregroundColor(K.Colors.accentColor)
+                Text(asset.name ?? asset.type.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(K.Colors.textSecondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 6)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(K.Colors.backgroundTertiary)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(K.Colors.borderColor.opacity(0.3), lineWidth: 1)
-        )
     }
 }
 

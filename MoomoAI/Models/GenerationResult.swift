@@ -17,8 +17,6 @@ struct GenerationResult: Identifiable, Equatable {
     let path: String?     // Storage path, used as the source for image edits
     let createdAt: String
 
-    var isImage: Bool { url != nil }
-
     /// Parse the clean JSON returned by the callable Cloud Functions.
     init?(from data: [String: Any]) {
         guard let id = data["id"] as? String,

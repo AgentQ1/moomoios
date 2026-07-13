@@ -2,9 +2,9 @@
 //  MockAIService.swift
 //  MoomoAI
 //
-//  Lightweight chat-model metadata and error type. Real generation now runs
-//  through GenerationService (Cloud Functions + Gemini); this file only holds
-//  the small enums the chat UI still references.
+//  Lightweight chat-model metadata. Real generation runs through
+//  GenerationService (Cloud Functions + Gemini); this file only holds the
+//  model enum the chat UI references.
 //
 
 import Foundation
@@ -22,23 +22,6 @@ enum AIModel: String, CaseIterable {
     var description: String {
         switch self {
         case .Q1: return "Moomo default model"
-        }
-    }
-}
-
-/// Error type used by the chat UI's error-handling paths.
-enum ModelAPIError: LocalizedError {
-    case invalidModel
-    case invalidResponse
-    case httpError(Int)
-    case apiError(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidModel: return "Invalid model selected"
-        case .invalidResponse: return "Invalid response"
-        case .httpError(let code): return "Error: \(code)"
-        case .apiError(let message): return "Error: \(message)"
         }
     }
 }

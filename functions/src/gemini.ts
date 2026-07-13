@@ -21,7 +21,59 @@ export interface GeneratedImage {
   mimeType: string;
 }
 
-/** Plain text generation. */
+/** An image attached to a chat message, sent inline as base64. */
+export interface InlineImage {
+  data: string; // base64 (no data: prefix)
+  mimeType: string;
+}
+
+/** One prior conversation turn, already validated by the caller. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/**
+ * Chat generation, optionally multimodal. The system prompt travels as a real
+ * `systemInstruction` (not pasted into the conversation text), history turns
+ * map to role-tagged contents, and attached images ride in the SAME final
+ * user turn as the message text — the multimodal input structure Gemini
+ * expects for image understanding. An image URL or path embedded in prompt
+ * text would give the model no visual access.
+ */
+export async function chat(
+  apiKey: string,
+  args: {
+    system: string;
+    history: ChatTurn[];
+    message: string;
+    images: InlineImage[];
+  }
+): Promise<string> {
+  const contents = [
+    ...args.history.map((turn) => ({
+      role: turn.role === "assistant" ? ("model" as const) : ("user" as const),
+      parts: [{ text: turn.text }],
+    })),
+    {
+      role: "user" as const,
+      parts: [
+        ...args.images.map((img) => ({ inlineData: { data: img.data, mimeType: img.mimeType } })),
+        { text: args.message },
+      ],
+    },
+  ];
+  const res = await ai(apiKey).models.generateContent({
+    model: TEXT_MODEL,
+    contents,
+    config: { systemInstruction: args.system },
+  });
+  const text = res.text?.trim();
+  if (!text) throw new Error("Empty text response from Gemini");
+  return text;
+}
+
+/** Plain single-prompt text generation (utility calls: text edit, memory). */
 export async function generateText(apiKey: string, prompt: string): Promise<string> {
   const res = await ai(apiKey).models.generateContent({
     model: TEXT_MODEL,

@@ -42,8 +42,9 @@ struct ChatSession: Identifiable, Codable, Equatable, Hashable {
         messages.append(message)
         updatedAt = Date()
         
-        // Auto-generate title from first user message if still "New chat"
-        if title == "New chat", message.role == .user, messages.count <= 2 {
+        // Auto-generate title from first user message if still "New chat".
+        // Image-only messages have empty content — keep the default title then.
+        if title == "New chat", message.role == .user, messages.count <= 2, !message.content.isEmpty {
             title = String(message.content.prefix(30))
         }
     }
@@ -52,20 +53,10 @@ struct ChatSession: Identifiable, Codable, Equatable, Hashable {
         title = newTitle
         updatedAt = Date()
     }
-    
-    // PERFORMANCE: Proper Equatable for SwiftUI optimization
-    static func == (lhs: ChatSession, rhs: ChatSession) -> Bool {
-        lhs.id == rhs.id &&
-        lhs.title == rhs.title &&
-        lhs.messages.count == rhs.messages.count &&
-        lhs.updatedAt == rhs.updatedAt &&
-        lhs.isPinned == rhs.isPinned
-    }
-    
-    // PERFORMANCE: Hashable for efficient ForEach rendering
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
+
+    // Equatable/Hashable are synthesized over ALL fields. The previous custom ==
+    // compared only messages.count, so in-place message changes (reactions,
+    // typing → content) could read as "equal" and be skipped by SwiftUI diffing.
 }
 
 // Sample data for previews

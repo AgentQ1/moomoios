@@ -2,253 +2,362 @@
 //  MarkdownFormatter.swift
 //  MoomoAI
 //
-//  Formats markdown text to AttributedString - EXACTLY matching webapp formatting
+//  The single Markdown rendering system for assistant messages.
+//
+//  Parsing is delegated to Foundation's cmark-based parser
+//  (AttributedString(markdown:) with .full syntax), which correctly handles
+//  the edge cases a hand-rolled scanner gets wrong: nested emphasis, escapes,
+//  unterminated markers, indentation-based list nesting. Block structure
+//  (headings, lists, code blocks, quotes) arrives as PresentationIntent
+//  attributes; MarkdownFormatter regroups the parsed runs into blocks and
+//  MarkdownText lays them out as native SwiftUI views — so raw markers
+//  (**, ###, backticks, "- ") can never leak into the rendered output.
 //
 
 import SwiftUI
 
-struct MarkdownFormatter {
-    /// Clean markdown text by removing symbols for display in TextEditor
-    static func cleanMarkdown(_ text: String) -> String {
-        var cleaned = text
-        
-        // Remove markdown headers
-        cleaned = cleaned.replacingOccurrences(of: "###", with: "")
-        cleaned = cleaned.replacingOccurrences(of: "##", with: "")
-        
-        // Remove bold markers but keep the text
-        cleaned = cleaned.replacingOccurrences(of: "**", with: "")
-        
-        // Remove italic markers
-        cleaned = cleaned.replacingOccurrences(of: "_", with: "")
-        
-        // Remove code block markers
-        cleaned = cleaned.replacingOccurrences(of: "```", with: "")
-        
-        // Clean up extra spaces
-        cleaned = cleaned.replacingOccurrences(of: "  ", with: " ")
-        
-        return cleaned
+// MARK: - Block model
+
+/// One visual block of a rendered assistant message.
+struct MarkdownBlock: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case paragraph
+        case heading(level: Int)
+        /// `depth` is 0-based nesting; `marker` is the rendered prefix ("•", "3.").
+        case listItem(depth: Int, marker: String)
+        case codeBlock(language: String?)
+        case blockQuote
+        case thematicBreak
     }
-    
-    /// Convert markdown text to AttributedString with EXACT webapp styling
-    static func format(_ text: String) -> AttributedString {
-        // Use manual parsing for consistent formatting matching web app
-        return parseManually(text)
+
+    let id: Int
+    let kind: Kind
+    var text: AttributedString
+}
+
+// MARK: - Parser
+
+enum MarkdownFormatter {
+
+    /// Parsed results keyed by source text. Message content is immutable and
+    /// responses arrive in one piece (no token streaming), so each message is
+    /// parsed exactly once; scroll passes re-evaluating row bodies hit the
+    /// cache instead of re-running the parser.
+    private final class BlocksBox {
+        let value: [MarkdownBlock]
+        init(_ value: [MarkdownBlock]) { self.value = value }
     }
-    
-    /// Manual parsing for better control over formatting - matches web app exactly
-    private static func parseManually(_ text: String) -> AttributedString {
-        var result = AttributedString()
-        
-        // Split into lines to process line by line
-        let lines = text.components(separatedBy: "\n")
-        var inCodeBlock = false
-        var codeBlockContent = ""
-        var codeBlockLanguage = ""
-        
-        for (index, line) in lines.enumerated() {
-            // Check for code block start/end
-            if line.hasPrefix("```") {
-                if !inCodeBlock {
-                    // Starting a code block
-                    inCodeBlock = true
-                    codeBlockLanguage = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                    codeBlockContent = ""
-                } else {
-                    // Ending a code block - add formatted code
-                    if !codeBlockContent.isEmpty {
-                        var codeAttr = AttributedString("\n")
-                        
-                        // Add language label if present
-                        if !codeBlockLanguage.isEmpty {
-                            var langLabel = AttributedString(codeBlockLanguage + "\n")
-                            langLabel.font = .system(size: 12, weight: .medium)
-                            langLabel.foregroundColor = Color(red: 0x66/255.0, green: 0x99/255.0, blue: 0xff/255.0)
-                            codeAttr.append(langLabel)
-                        }
-                        
-                        // Add code content
-                        var code = AttributedString(codeBlockContent)
-                        code.font = .system(size: 13, design: .monospaced)
-                        code.foregroundColor = Color(red: 0xe3/255.0, green: 0xe3/255.0, blue: 0xe3/255.0)
-                        code.backgroundColor = Color(red: 0x2a/255.0, green: 0x2a/255.0, blue: 0x2a/255.0)
-                        codeAttr.append(code)
-                        
-                        var newline = AttributedString("\n\n")
-                        newline.font = .system(size: 15, weight: .regular)
-                        codeAttr.append(newline)
-                        
-                        result.append(codeAttr)
-                    }
-                    inCodeBlock = false
-                    codeBlockContent = ""
-                    codeBlockLanguage = ""
-                }
-                continue
-            }
-            
-            // Inside code block - accumulate content
-            if inCodeBlock {
-                if !codeBlockContent.isEmpty {
-                    codeBlockContent += "\n"
-                }
-                codeBlockContent += line
-                continue
-            }
-            
-            // Process regular line with inline formatting
-            var lineAttr = processInlineFormatting(line)
-            
-            // Add line break except for last line
-            if index < lines.count - 1 {
-                lineAttr.append(AttributedString("\n"))
-            }
-            
-            result.append(lineAttr)
-        }
-        
-        return result
+
+    private static let cache: NSCache<NSString, BlocksBox> = {
+        let cache = NSCache<NSString, BlocksBox>()
+        cache.countLimit = 300
+        return cache
+    }()
+
+    static func blocks(for text: String) -> [MarkdownBlock] {
+        let key = text as NSString
+        if let hit = cache.object(forKey: key) { return hit.value }
+        let value = parse(text)
+        cache.setObject(BlocksBox(value), forKey: key)
+        return value
     }
-    
-    /// Process inline markdown formatting (bold, italic, code, links)
-    private static func processInlineFormatting(_ text: String) -> AttributedString {
-        var result = AttributedString()
-        var remaining = text
-        
-        // Process headers first
-        if text.hasPrefix("### ") {
-            var header = AttributedString(String(text.dropFirst(4)))
-            header.font = .system(size: 17, weight: .semibold)
-            header.foregroundColor = Color(red: 0xe3/255.0, green: 0xe3/255.0, blue: 0xe3/255.0)
-            return header
-        } else if text.hasPrefix("## ") {
-            var header = AttributedString(String(text.dropFirst(3)))
-            header.font = .system(size: 20, weight: .semibold)
-            header.foregroundColor = Color(red: 0xe3/255.0, green: 0xe3/255.0, blue: 0xe3/255.0)
-            return header
-        } else if text.hasPrefix("# ") {
-            var header = AttributedString(String(text.dropFirst(2)))
-            header.font = .system(size: 24, weight: .semibold)
-            header.foregroundColor = Color(red: 0xe3/255.0, green: 0xe3/255.0, blue: 0xe3/255.0)
-            return header
+
+    private static func parse(_ text: String) -> [MarkdownBlock] {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .full,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+        guard let parsed = try? AttributedString(markdown: text, options: options),
+              !parsed.characters.isEmpty else {
+            // Unparseable input degrades to plain text — never to raw markers
+            // mixed with broken styling.
+            return [MarkdownBlock(id: 0, kind: .paragraph, text: AttributedString(text))]
         }
-        
-        // Process list items
-        if text.hasPrefix("- ") || text.hasPrefix("* ") {
-            var bullet = AttributedString("• ")
-            bullet.font = .system(size: 15, weight: .regular)
-            result.append(bullet)
-            remaining = String(text.dropFirst(2))
-        } else if let match = text.range(of: #"^\d+\.\s"#, options: .regularExpression) {
-            var number = AttributedString(String(text[match]))
-            number.font = .system(size: 15, weight: .regular)
-            result.append(number)
-            remaining = String(text[match.upperBound...])
+
+        var blocks: [MarkdownBlock] = []
+        var lastIdentity: [Int]?
+        var lastTableColumn: Int?
+
+        for run in parsed.runs {
+            let intent = run.presentationIntent
+
+            // Author line breaks inside a paragraph (soft or hard) must stay
+            // visible line breaks — cmark's "soft break becomes a space" would
+            // collapse the short stacked lines chat models emit.
+            let slice: AttributedString
+            if let inline = run.inlinePresentationIntent,
+               inline.contains(.softBreak) || inline.contains(.lineBreak) {
+                slice = AttributedString("\n")
+            } else {
+                slice = AttributedString(parsed[run.range])
+            }
+
+            let identity = groupIdentity(intent)
+            let column = tableColumn(intent)
+            if identity == lastIdentity, !blocks.isEmpty {
+                // Same block: e.g. the plain + bold runs of one paragraph, or
+                // the cells of one table row (separated for readability —
+                // tables degrade to one plain line per row).
+                if let column, let lastColumn = lastTableColumn, column != lastColumn {
+                    blocks[blocks.count - 1].text.append(AttributedString("   "))
+                }
+                blocks[blocks.count - 1].text.append(slice)
+            } else {
+                blocks.append(MarkdownBlock(id: blocks.count, kind: kind(of: intent), text: slice))
+                lastIdentity = identity
+            }
+            lastTableColumn = column
         }
-        
-        // Process inline patterns (code, bold, italic, links)
-        while !remaining.isEmpty {
-            // Look for inline code `code`
-            if let codeRange = findPattern(in: remaining, pattern: "`", endPattern: "`") {
-                // Add text before code
-                let beforeCode = String(remaining[..<codeRange.lowerBound])
-                if !beforeCode.isEmpty {
-                    var plain = AttributedString(beforeCode)
-                    plain.font = .system(size: 15, weight: .regular)
-                    result.append(plain)
-                }
-                
-                // Add code
-                let codeText = String(remaining[codeRange]).dropFirst().dropLast()
-                var code = AttributedString(String(codeText))
-                code.font = .system(size: 13, design: .monospaced)
-                code.foregroundColor = Color(red: 0x8B/255.0, green: 0x5C/255.0, blue: 0xF6/255.0)
-                code.backgroundColor = Color(red: 0x2a/255.0, green: 0x2a/255.0, blue: 0x2a/255.0)
-                result.append(code)
-                
-                remaining = String(remaining[codeRange.upperBound...])
+
+        for index in blocks.indices {
+            if case .codeBlock = blocks[index].kind {
+                blocks[index].text = trimmingTrailingNewlines(blocks[index].text)
+            } else {
+                styleInlineCode(&blocks[index].text)
             }
-            // Look for bold **text**
-            else if let boldRange = findPattern(in: remaining, pattern: "**", endPattern: "**") {
-                let beforeBold = String(remaining[..<boldRange.lowerBound])
-                if !beforeBold.isEmpty {
-                    var plain = AttributedString(beforeBold)
-                    plain.font = .system(size: 15, weight: .regular)
-                    result.append(plain)
-                }
-                
-                let boldText = String(remaining[boldRange]).dropFirst(2).dropLast(2)
-                var bold = AttributedString(String(boldText))
-                bold.font = .system(size: 15, weight: .semibold)
-                result.append(bold)
-                
-                remaining = String(remaining[boldRange.upperBound...])
-            }
-            // Look for italic *text*
-            else if let italicRange = findPattern(in: remaining, pattern: "*", endPattern: "*") {
-                let beforeItalic = String(remaining[..<italicRange.lowerBound])
-                if !beforeItalic.isEmpty {
-                    var plain = AttributedString(beforeItalic)
-                    plain.font = .system(size: 15, weight: .regular)
-                    result.append(plain)
-                }
-                
-                let italicText = String(remaining[italicRange]).dropFirst().dropLast()
-                var italic = AttributedString(String(italicText))
-                italic.font = .system(size: 15, weight: .regular).italic()
-                result.append(italic)
-                
-                remaining = String(remaining[italicRange.upperBound...])
-            }
-            // No special formatting found, add rest as plain text
-            else {
-                var plain = AttributedString(remaining)
-                plain.font = .system(size: 15, weight: .regular)
-                result.append(plain)
+        }
+        return blocks
+    }
+
+    /// The identity path that defines "same visual block". Table cells are
+    /// excluded so all cells of a row merge into one line.
+    private static func groupIdentity(_ intent: PresentationIntent?) -> [Int] {
+        guard let intent else { return [] }
+        return intent.components.compactMap { component in
+            if case .tableCell = component.kind { return nil }
+            return component.identity
+        }
+    }
+
+    private static func tableColumn(_ intent: PresentationIntent?) -> Int? {
+        guard let intent else { return nil }
+        for component in intent.components {
+            if case .tableCell(let columnIndex) = component.kind { return columnIndex }
+        }
+        return nil
+    }
+
+    /// Map an intent stack (ordered innermost → outermost) to a block kind.
+    private static func kind(of intent: PresentationIntent?) -> MarkdownBlock.Kind {
+        guard let intent else { return .paragraph }
+        let components = intent.components
+
+        for component in components {
+            switch component.kind {
+            case .header(let level):
+                return .heading(level: level)
+            case .codeBlock(let languageHint):
+                let language = languageHint?.trimmingCharacters(in: .whitespaces)
+                return .codeBlock(language: (language?.isEmpty ?? true) ? nil : language)
+            case .thematicBreak:
+                return .thematicBreak
+            default:
                 break
             }
         }
-        
-        return result
+
+        // List item: nesting depth is the count of enclosing listItem intents;
+        // the innermost item's ordinal + its containing list pick the marker.
+        let listItems = components.enumerated().filter {
+            if case .listItem = $0.element.kind { return true }
+            return false
+        }
+        if let innermost = listItems.first,
+           case .listItem(let ordinal) = innermost.element.kind {
+            let depth = listItems.count - 1
+            var ordered = false
+            for component in components[(innermost.offset + 1)...] {
+                if case .orderedList = component.kind { ordered = true; break }
+                if case .unorderedList = component.kind { break }
+            }
+            let marker = ordered ? "\(ordinal)." : bulletMarker(depth: depth)
+            return .listItem(depth: depth, marker: marker)
+        }
+
+        if components.contains(where: {
+            if case .blockQuote = $0.kind { return true }
+            return false
+        }) {
+            return .blockQuote
+        }
+        return .paragraph
     }
-    
-    /// Find a pattern in text (like `code` or **bold**)
-    private static func findPattern(in text: String, pattern: String, endPattern: String) -> Range<String.Index>? {
-        guard let startRange = text.range(of: pattern) else { return nil }
-        let searchStart = text.index(after: startRange.upperBound)
-        guard searchStart < text.endIndex else { return nil }
-        
-        let remainingText = text[searchStart...]
-        guard let endRange = remainingText.range(of: endPattern) else { return nil }
-        
-        return startRange.lowerBound..<endRange.upperBound
+
+    private static func bulletMarker(depth: Int) -> String {
+        switch depth {
+        case 0: return "•"
+        case 1: return "◦"
+        default: return "▪"
+        }
     }
-    
-    /// Check if text contains markdown
-    static func containsMarkdown(_ text: String) -> Bool {
-        let markdownPatterns = ["**", "*", "`", "```", "#", "-", "1.", "•"]
-        return markdownPatterns.contains { text.contains($0) }
+
+    /// Tint inline code spans. Bold/italic/links render natively from the
+    /// parsed attributes; inline code additionally gets a monospaced font and
+    /// a subtle chip background so it reads as code without raw backticks.
+    private static func styleInlineCode(_ text: inout AttributedString) {
+        let ranges = text.runs.compactMap { run -> Range<AttributedString.Index>? in
+            guard let inline = run.inlinePresentationIntent, inline.contains(.code) else { return nil }
+            return run.range
+        }
+        for range in ranges {
+            text[range].font = .system(.callout, design: .monospaced)
+            text[range].foregroundColor = K.Colors.royalPurple
+            text[range].backgroundColor = K.Colors.backgroundSecondary
+        }
     }
-    
-    /// Extract code blocks from text
-    static func extractCodeBlocks(_ text: String) -> [(language: String, code: String)] {
-        var codeBlocks: [(String, String)] = []
-        let pattern = "```(\\w+)?\\n([\\s\\S]*?)```"
-        
-        if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-            let nsString = text as NSString
-            let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
-            
-            for result in results {
-                let language = result.range(at: 1).location != NSNotFound 
-                    ? nsString.substring(with: result.range(at: 1)) 
-                    : "code"
-                let code = nsString.substring(with: result.range(at: 2))
-                codeBlocks.append((language, code))
+
+    private static func trimmingTrailingNewlines(_ text: AttributedString) -> AttributedString {
+        var text = text
+        while text.characters.last == "\n" {
+            let end = text.endIndex
+            text.removeSubrange(text.index(end, offsetByCharacters: -1)..<end)
+        }
+        return text
+    }
+}
+
+// MARK: - Renderer
+
+/// Renders assistant-message Markdown as a stack of native SwiftUI blocks.
+/// This is the only place Markdown becomes pixels — one renderer, no
+/// competing parsers. Typography uses Dynamic Type text styles throughout.
+struct MarkdownText: View {
+    let text: String
+
+    var body: some View {
+        let blocks = MarkdownFormatter.blocks(for: text)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(blocks) { block in
+                blockView(block)
+                    .padding(.top, topSpacing(of: block, in: blocks))
             }
         }
-        
-        return codeBlocks
+        .tint(K.Colors.royalBlue) // link color
     }
+
+    /// Compact, chat-style vertical rhythm: list rows sit tight, paragraphs
+    /// breathe, headings get extra air above.
+    private func topSpacing(of block: MarkdownBlock, in blocks: [MarkdownBlock]) -> CGFloat {
+        guard block.id > 0 else { return 0 }
+        switch (blocks[block.id - 1].kind, block.kind) {
+        case (.listItem, .listItem): return 5
+        case (_, .heading): return 14
+        default: return 10
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: MarkdownBlock) -> some View {
+        switch block.kind {
+        case .paragraph:
+            styledText(block.text, font: .body)
+
+        case .heading(let level):
+            styledText(block.text, font: headingFont(level))
+
+        case .listItem(let depth, let marker):
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text(marker)
+                    .font(.body)
+                    .foregroundColor(K.Colors.ink)
+                    .frame(minWidth: 16, alignment: .trailing)
+                styledText(block.text, font: .body)
+            }
+            .padding(.leading, CGFloat(depth) * 18)
+
+        case .codeBlock(let language):
+            codeBlockView(block.text, language: language)
+
+        case .blockQuote:
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(K.Colors.goldSoft)
+                    .frame(width: 3)
+                styledText(block.text, font: .body, color: K.Colors.textSecondary)
+            }
+
+        case .thematicBreak:
+            Divider().overlay(K.Colors.borderColor)
+        }
+    }
+
+    private func styledText(_ text: AttributedString, font: Font, color: Color = K.Colors.ink) -> some View {
+        Text(text)
+            .font(font)
+            .foregroundColor(color)
+            .lineSpacing(3.5)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: return .system(.title2).weight(.semibold)
+        case 2: return .system(.title3).weight(.semibold)
+        default: return .system(.headline)
+        }
+    }
+
+    /// Fenced code block: monospaced, on a card, horizontally scrollable so
+    /// long lines never push the layout under the composer or off-screen.
+    private func codeBlockView(_ text: AttributedString, language: String?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let language {
+                Text(language)
+                    .font(.caption2.weight(.medium))
+                    .foregroundColor(K.Colors.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(String(text.characters))
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundColor(K.Colors.ink)
+                    .lineSpacing(2)
+                    .textSelection(.enabled)
+                    .padding(12)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(K.Colors.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(K.Colors.borderColor, lineWidth: 1)
+        )
+    }
+}
+
+#Preview {
+    ScrollView {
+        MarkdownText(text: """
+        ## Deleting the other apps
+
+        I can see **four app records** in App Store Connect. Here's how:
+
+        1. Open the app you want to remove
+        2. Scroll to *Additional Information*
+        3. Tap `Remove App`
+
+        - First point
+        - Second point
+          - Nested detail
+          - Another nested one
+
+        Inline `code` and a [link](https://developer.apple.com).
+
+        ```swift
+        let answer = 42
+        print("hello")
+        ```
+
+        > App records can only be removed when they meet Apple's eligibility conditions.
+        """)
+        .padding()
+    }
+    .background(K.Colors.cream)
 }

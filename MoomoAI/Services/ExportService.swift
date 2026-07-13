@@ -301,7 +301,9 @@ class ExportService {
             try content.write(to: fileURL, atomically: true, encoding: .utf8)
             return fileURL
         } catch {
+            #if DEBUG
             print("Error saving TXT file: \(error)")
+            #endif
             return nil
         }
     }
@@ -314,7 +316,9 @@ class ExportService {
             try data.write(to: fileURL)
             return fileURL
         } catch {
+            #if DEBUG
             print("Error saving PDF file: \(error)")
+            #endif
             return nil
         }
     }
@@ -327,18 +331,26 @@ class ExportService {
             .trimmingCharacters(in: .whitespaces)
     }
     
-    // MARK: - Date Formatters
-    
-    private func formatDate(_ date: Date) -> String {
+    // MARK: - Date Formatters (creating DateFormatter is expensive — reuse them)
+
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-    
-    private func formatTime(_ date: Date) -> String {
+        return formatter
+    }()
+
+    private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    private func formatDate(_ date: Date) -> String {
+        Self.dateFormatter.string(from: date)
+    }
+
+    private func formatTime(_ date: Date) -> String {
+        Self.timeFormatter.string(from: date)
     }
 }

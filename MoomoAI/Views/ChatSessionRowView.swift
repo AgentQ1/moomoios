@@ -31,12 +31,6 @@ struct ChatSessionRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Chat icon
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.system(size: 16))
-                    .foregroundColor(isSelected ? K.Colors.accentColor : K.Colors.textSecondary)
-                    .frame(width: 24)
-                
                 // Title and preview
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {

@@ -40,10 +40,29 @@ struct SparkleMark: View {
     }
 }
 
-// MARK: - Top-right sparkle button (white circle + gold sparkle)
+// MARK: - Top-right header button (white circle + gold symbol)
 
-/// The circular white sparkle button pinned to the top-right of the chat header.
-struct SparkleCircleButton: View {
+/// What the header circle shows: an SF Symbol, or the brand gold sparkle
+/// (the four-point star) — used as the Exit button in Temporary Chat.
+enum HeaderCircleIcon: Equatable {
+    case symbol(String)
+    case sparkle
+
+    /// Stable identity for the crossfade animation between icons.
+    var key: String {
+        switch self {
+        case .symbol(let name): return name
+        case .sparkle: return "moomo.sparkle"
+        }
+    }
+}
+
+/// The circular white action button pinned to the top-right of the chat header.
+/// The gold symbol inside is caller-supplied so the icon can be state-driven
+/// (e.g. Temporary Chat on an empty conversation, New Chat once one is active).
+struct HeaderCircleButton: View {
+    var icon: HeaderCircleIcon
+    var accessibilityLabel: String
     var action: () -> Void
 
     var body: some View {
@@ -56,11 +75,29 @@ struct SparkleCircleButton: View {
                     .fill(Color.white)
                     .overlay(Circle().stroke(K.Colors.goldSoft.opacity(0.5), lineWidth: 1))
                     .shadow(color: K.Colors.navy.opacity(0.08), radius: 10, x: 0, y: 4)
-                SparkleMark(color: K.Colors.gold, size: 18)
+                // Keyed by the icon identity so an icon change crossfades in
+                // place while the circle itself never moves or re-animates.
+                iconView
+                    .id(icon.key)
+                    .transition(.opacity.combined(with: .scale(scale: 0.6)))
             }
             .frame(width: 44, height: 44)
+            .animation(.easeInOut(duration: 0.18), value: icon.key)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(accessibilityLabel))
+    }
+
+    @ViewBuilder
+    private var iconView: some View {
+        switch icon {
+        case .symbol(let name):
+            Image(systemName: name)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(K.Colors.gold)
+        case .sparkle:
+            SparkleMark(color: K.Colors.gold, size: 18)
+        }
     }
 }
 

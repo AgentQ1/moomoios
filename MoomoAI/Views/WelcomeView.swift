@@ -11,8 +11,11 @@ import SwiftUI
 
 struct WelcomeView: View {
     var body: some View {
+        // Spacers use small minimums so this view can compress when the keyboard
+        // takes over half the screen; with the keyboard hidden they still expand
+        // to fill, so the resting layout is unchanged.
         VStack(spacing: 0) {
-            Spacer(minLength: 40)
+            Spacer(minLength: 8)
 
             // Glowing sparkle orb.
             GlowingSparkleOrb()
@@ -27,9 +30,9 @@ struct WelcomeView: View {
                 .foregroundColor(K.Colors.textSecondary)
                 .padding(.top, 18)
 
-            Spacer(minLength: 40)
+            Spacer(minLength: 8)
             // Bias the cluster slightly above vertical center, matching the screenshot.
-            Spacer(minLength: 40)
+            Spacer(minLength: 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

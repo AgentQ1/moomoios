@@ -45,9 +45,6 @@ struct ChatMessage: Identifiable, Codable, Equatable, Hashable {
         self.attachmentMime = attachmentMime
     }
 
-    /// True when this assistant message is an AI-generated/edited image.
-    var isGeneratedImage: Bool { imageURL != nil }
-    
     mutating func addReaction(_ emoji: String) {
         if !reactions.contains(emoji) {
             reactions.append(emoji)
@@ -57,29 +54,9 @@ struct ChatMessage: Identifiable, Codable, Equatable, Hashable {
     mutating func removeReaction(_ emoji: String) {
         reactions.removeAll { $0 == emoji }
     }
-    
-    // PERFORMANCE: Proper Equatable implementation for SwiftUI optimization
-    static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {
-        lhs.id == rhs.id &&
-        lhs.content == rhs.content &&
-        lhs.isTyping == rhs.isTyping &&
-        lhs.reactions == rhs.reactions &&
-        lhs.imageData == rhs.imageData &&
-        lhs.imageURL == rhs.imageURL
-    }
-    
-    // PERFORMANCE: Hashable for efficient ForEach rendering
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-}
 
-// Extension for conversation history format
-extension ChatMessage {
-    var conversationFormat: [String: Any] {
-        return [
-            "role": role == .user ? "user" : "model",
-            "parts": [["text": content]]
-        ]
-    }
+    // Equatable/Hashable are synthesized over ALL fields. The previous custom ==
+    // skipped imagePath/prompt/model/attachment fields, so rows that changed only
+    // in those (e.g. hydration adding the "Edit image" affordance) could be
+    // considered unchanged and skip re-rendering.
 }

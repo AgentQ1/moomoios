@@ -24,8 +24,10 @@ If Xcode prompts to resolve packages on first open, let it finish, then:
 1. Select the **MoomoIOS** scheme + a simulator (e.g. iPhone 16).
 2. **Product → Run** (⌘R).
 
-The client talks to Firestore/Storage only through Cloud Functions, so the heavy
-FirebaseFirestore SDK is intentionally not linked.
+Generation (Gemini) always goes through Cloud Functions. The client additionally
+links FirebaseFirestore for its own data: chat history + conversation metadata
+under `users/{uid}/conversations/**` and reading the memory profile
+(`users/{uid}/memory/profile` is client-read-only; writes happen server-side).
 
 ### Apple Sign-In note
 The app uses the **native** `ASAuthorization` flow, so it needs only: the Apple
@@ -37,7 +39,7 @@ with your team. No Apple Services ID / `.p8` key is required for native iOS.
 
 | Function             | Input                     | Output (JSON)                        |
 |----------------------|---------------------------|--------------------------------------|
-| `generateText`       | `{ prompt }`              | `{ id, type, text, createdAt }`      |
+| `generateText`       | `{ message, history?, memory?, language?, languageCode? }` (legacy `{ prompt }` still accepted) | `{ id, type, text, createdAt }` |
 | `editGeneratedText`  | `{ text, instruction }`   | `{ id, type, text, createdAt }`      |
 | `generateImage`      | `{ prompt }`              | `{ id, type, url, path, createdAt }` |
 | `editGeneratedImage` | `{ path, instruction }`   | `{ id, type, url, path, createdAt }` |

@@ -73,13 +73,25 @@ struct MessageBubbleView: View {
         }
     }
 
+    /// Decoded thumbnail for an attached image, served from the memory-cached
+    /// two-tier store. Falls back to the on-disk copy (by message id) so
+    /// thumbnails survive cloud hydration replacing the message (cloud copies
+    /// carry no image bytes). Gated so plain text rows never touch the disk.
+    private var attachedThumbnail: UIImage? {
+        guard message.imageData != nil || (message.attachmentMime?.hasPrefix("image/") ?? false) else {
+            return nil
+        }
+        return ImageCache.shared.messageThumbnail(id: message.id, data: message.imageData)
+    }
+
     // MARK: - User message (right-aligned, royal-navy, with read receipt)
     private var userMessage: some View {
-        HStack {
+        let thumbnail = attachedThumbnail
+        return HStack {
             Spacer(minLength: 48)
             VStack(alignment: .trailing, spacing: 6) {
                 // Attached image thumbnail (tap to preview)
-                if let imageData = message.imageData, let uiImage = UIImage(data: imageData) {
+                if let uiImage = thumbnail {
                     Button(action: { showFullScreenImage = true }) {
                         Image(uiImage: uiImage)
                             .resizable()
@@ -90,8 +102,8 @@ struct MessageBubbleView: View {
                     .buttonStyle(.plain)
                 }
 
-                // Attached document chip
-                if let name = message.attachmentName {
+                // Attached document chip (images render as thumbnails above)
+                if let name = message.attachmentName, thumbnail == nil {
                     documentChip(name: name)
                 }
 
@@ -162,7 +174,7 @@ struct MessageBubbleView: View {
 
     private var previewSource: ImageSource? {
         if let urlString = message.imageURL, let url = URL(string: urlString) { return .remote(url) }
-        if let data = message.imageData, let image = UIImage(data: data) { return .local(image) }
+        if let image = attachedThumbnail { return .local(image) }
         return nil
     }
 
@@ -264,16 +276,12 @@ struct MessageBubbleView: View {
         )
     }
 
-    // MARK: - Message Content (EXACT webapp styling)
+    // MARK: - Message Content
+    /// Assistant markdown rendered block-by-block (MarkdownText owns all
+    /// typography: Dynamic Type, compact spacing, list gutters, code cards).
     private var messageContent: some View {
-        Text(MarkdownFormatter.format(message.content))
-            .font(.system(size: 17, weight: .regular))
-            .lineSpacing(8)
-            .foregroundColor(K.Colors.ink)
+        MarkdownText(text: message.content)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .textSelection(.enabled)
     }
 
     // MARK: - Typing Indicator
@@ -310,7 +318,10 @@ struct MessageBubbleView: View {
 #Preview {
     VStack(spacing: 24) {
         MessageBubbleView(message: ChatMessage(role: .user, content: "Hello, how are you?"))
-        MessageBubbleView(message: ChatMessage(role: .assistant, content: "I'm doing great! How can I help you today?"))
+        MessageBubbleView(message: ChatMessage(
+            role: .assistant,
+            content: "**Individual item actions:**\n\n1. Open the item\n2. Tap `Remove App`\n- One bullet\n  - Nested bullet"
+        ))
         MessageBubbleView(message: ChatMessage(role: .assistant, content: "", isTyping: true))
     }
     .padding()

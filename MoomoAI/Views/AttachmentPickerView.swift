@@ -2,110 +2,13 @@
 //  AttachmentPickerView.swift
 //  MoomoAI
 //
-//  Enhanced attachment system with photo, document, and camera support
+//  Attachment pickers (photo library, files, camera) and the AttachmentItem
+//  model used by the chat composer.
 //
 
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
-
-struct AttachmentPickerView: View {
-    @Environment(\.dismiss) var dismiss
-    @State private var showImagePicker = false
-    @State private var showDocumentPicker = false
-    @State private var showCamera = false
-    
-    let onAttachmentSelected: (AttachmentItem) -> Void
-    
-    var body: some View {
-        NavigationView {
-            List {
-                Section("Media") {
-                    attachmentRow(
-                        icon: "photo.on.rectangle",
-                        title: "Photo Library",
-                        color: .purple
-                    ) {
-                        showImagePicker = true
-                    }
-                    
-                    attachmentRow(
-                        icon: "camera.fill",
-                        title: "Camera",
-                        color: .green
-                    ) {
-                        showCamera = true
-                    }
-                }
-                
-                Section("Files") {
-                    attachmentRow(
-                        icon: "doc.fill",
-                        title: "Browse Files",
-                        color: .cyan
-                    ) {
-                        showDocumentPicker = true
-                    }
-                }
-            }
-            .navigationTitle("Add Attachment")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-            }
-            .sheet(isPresented: $showImagePicker) {
-                if #available(iOS 16.0, *) {
-                    PhotoPickerView { items in
-                        for item in items {
-                            onAttachmentSelected(item)
-                        }
-                        dismiss()
-                    }
-                } else {
-                    // Fallback for iOS 15
-                    Text("Photo picker requires iOS 16+")
-                        .padding()
-                }
-            }
-            .sheet(isPresented: $showDocumentPicker) {
-                DocumentPickerView { item in
-                    onAttachmentSelected(item)
-                    dismiss()
-                }
-            }
-            .sheet(isPresented: $showCamera) {
-                CameraView { item in
-                    onAttachmentSelected(item)
-                    dismiss()
-                }
-            }
-        }
-    }
-    
-    private func attachmentRow(icon: String, title: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundColor(color)
-                    .frame(width: 32)
-                
-                Text(title)
-                    .foregroundColor(.primary)
-                
-                Spacer()
-                
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-}
 
 // MARK: - Photo Picker
 @available(iOS 16.0, *)
@@ -383,59 +286,5 @@ enum AttachmentType {
         case .pdf: return .red
         case .other: return .gray
         }
-    }
-}
-
-// MARK: - Attachment Preview
-struct AttachmentPreviewView: View {
-    let attachment: AttachmentItem
-    let onRemove: () -> Void
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Thumbnail or icon
-            if let thumbnail = attachment.thumbnail {
-                Image(uiImage: thumbnail)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                Image(systemName: attachment.type.icon)
-                    .font(.system(size: 20))
-                    .foregroundColor(attachment.type.color)
-                    .frame(width: 44, height: 44)
-                    .background(attachment.type.color.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(attachment.name)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                
-                Text(attachment.sizeFormatted)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(8)
-        .background(Color.secondary.opacity(0.1))
-        .cornerRadius(12)
-    }
-}
-
-struct AttachmentPickerView_Previews: PreviewProvider {
-    static var previews: some View {
-        AttachmentPickerView { _ in }
     }
 }

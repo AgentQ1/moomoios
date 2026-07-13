@@ -30,11 +30,14 @@ struct ChatView: View {
     @State private var showUnsupportedFileAlert = false
     @State private var unsupportedFileMessage = "This file type is not supported yet."
     @State private var isProcessingDocument = false
+    @State private var isSwitchingMode = false  // Blocks repeated header-button taps mid-transition
     @FocusState private var isInputFocused: Bool
     
-    // Speech recognition
+    // Speech recognition — prefer the device locale so dictation matches the
+    // user's language, falling back to en-US when unsupported.
     @State private var isRecording = false
-    @State private var speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    @State private var speechRecognizer = SFSpeechRecognizer(locale: Locale.current)
+        ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     @State private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     @State private var recognitionTask: SFSpeechRecognitionTask?
     @State private var audioEngine = AVAudioEngine()
@@ -74,9 +77,13 @@ struct ChatView: View {
                         }
                 }
             }
-            
-            // Input Area
+        }
+        // Composer lives in the bottom safe-area inset: the keyboard (and its
+        // predictive bar) raises that inset, so the send button can never be
+        // covered, and the messages ScrollView is inset automatically.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             inputArea
+                .background(K.Colors.cream)
         }
         .background(LuxuryBackground())
         .navigationBarHidden(true)
@@ -134,9 +141,21 @@ struct ChatView: View {
     }
     
     /// True while the current conversation has no messages yet — the empty
-    /// "home" state that shows the full Moomo brand cluster in the header.
+    /// "home" state that shows the full Moomo brand cluster in the header
+    /// center. The top-right action button does NOT use this: it is driven by
+    /// ChatMode, because a fresh temporary chat is also empty.
     private var isHomeState: Bool {
         chatViewModel.currentSession?.messages.isEmpty ?? true
+    }
+
+    /// Icon + accessibility label for the top-right action, one per ChatMode.
+    /// Temporary Chat shows the brand gold sparkle (never an X) as its Exit button.
+    private var headerAction: (icon: HeaderCircleIcon, label: String) {
+        switch chatViewModel.chatMode {
+        case .normalEmpty: return (.symbol("viewfinder"), "Start temporary chat")
+        case .temporary: return (.sparkle, "Exit temporary chat")
+        case .normalActive: return (.symbol("square.and.pencil"), "New chat")
+        }
     }
 
     // MARK: - Chat Header
@@ -169,11 +188,30 @@ struct ChatView: View {
 
             Spacer(minLength: 8)
 
-            // Top-right sparkle button — starts a fresh chat.
-            SparkleCircleButton {
+            // Top-right action button — ChatMode is the single source of truth:
+            // Temporary Chat on a normal empty conversation, Exit while in a
+            // temporary chat (even before any message), New Chat once a prompt
+            // is sent. isTemporary wins over message count.
+            HeaderCircleButton(
+                icon: headerAction.icon,
+                accessibilityLabel: headerAction.label
+            ) {
+                guard !isSwitchingMode else { return }
+                isSwitchingMode = true
                 withAnimation {
-                    chatViewModel.createNewSession()
+                    switch chatViewModel.chatMode {
+                    case .normalEmpty:
+                        chatViewModel.createTemporarySession()
+                    case .temporary:
+                        chatViewModel.exitTemporarySession()
+                    case .normalActive:
+                        chatViewModel.createNewSession()
+                    }
                     if isInputFocused { isInputFocused = false }
+                }
+                // Re-accept taps once the icon transition has settled.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isSwitchingMode = false
                 }
             }
         }
@@ -249,14 +287,7 @@ struct ChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
             }
-            .simultaneousGesture(
-                // Dismiss keyboard when scrolling
-                DragGesture().onChanged { _ in
-                    if isInputFocused {
-                        isInputFocused = false
-                    }
-                }
-            )
+            .dismissKeyboardOnScroll(isFocused: $isInputFocused)
             .onChange(of: session.messages.count) { _ in
                 // PERFORMANCE: Debounce scroll animation to prevent jank
                 if let lastMessage = session.messages.last {
@@ -465,7 +496,9 @@ struct ChatView: View {
     // MARK: - Composer Placeholder
     private var composerPlaceholder: String {
         if editingImage != nil { return "Describe your change…" }
+        if imageMode, attachments.contains(where: { $0.isSupportedImage }) { return "Describe your edit…" }
         if imageMode { return "Describe an image..." }
+        if attachments.contains(where: { $0.isSupportedImage }) { return "Ask about this image…" }
         if attachments.contains(where: { !$0.isSupportedImage }) { return "Ask about this document…" }
         return chatViewModel.currentSession?.isTemporary == true ? "Ask in a temporary chat" : "Ask anything..."
     }
@@ -508,6 +541,7 @@ struct ChatView: View {
         }
 
         let prompt = messageText.trimmed
+        let imageAttachments = attachments.filter { $0.isSupportedImage }
 
         // (0) Editing a previously generated image -> edit by Storage path.
         if let target = editingImage {
@@ -520,9 +554,10 @@ struct ChatView: View {
             return
         }
 
-        // (1) An attached image (Photo Library / Camera / Files) + prompt always
-        // uses the image-EDIT flow — never generateImage.
-        if let imageAttachment = attachments.first(where: { $0.type == .image }) {
+        // (1) Create-image mode + attached image -> EDIT the attached image
+        // (image output). Editing is only ever explicit — via this mode or the
+        // "Edit image" affordance above.
+        if imageMode, let imageAttachment = imageAttachments.first {
             let instruction = prompt.isEmpty ? "Edit this image" : prompt
             clearComposer()
             HapticFeedback.light()
@@ -530,13 +565,27 @@ struct ChatView: View {
             return
         }
 
-        // (2) An attached document (PDF / txt / doc) -> extract text and ask about it.
+        // (2) Attached image(s) + optional prompt -> ONE multimodal chat request
+        // (image understanding): the model receives the pixels and the question
+        // together. On failure the draft + attachments are restored for retry —
+        // the text is never silently sent without its images.
+        if !imageAttachments.isEmpty {
+            clearComposer()
+            HapticFeedback.light()
+            Task {
+                let sent = await chatViewModel.sendMessage(prompt, attachments: imageAttachments)
+                if !sent { restoreComposer(text: prompt, attachments: imageAttachments) }
+            }
+            return
+        }
+
+        // (3) An attached document (PDF / txt / doc) -> extract text and ask about it.
         if let document = attachments.first(where: { !$0.isSupportedImage }) {
             handleDocumentSend(document, question: prompt)
             return
         }
 
-        // (3) Create-image mode with no attached input image -> text-to-image.
+        // (4) Create-image mode with no attached input image -> text-to-image.
         if imageMode {
             guard !prompt.isEmpty else { return }
             clearComposer()
@@ -545,11 +594,22 @@ struct ChatView: View {
             return
         }
 
-        // (4) Plain text -> normal chat with conversation history + memory.
+        // (5) Plain text -> normal chat with conversation history + memory.
         guard !prompt.isEmpty else { return }
         clearComposer()
         HapticFeedback.light()
-        Task { await chatViewModel.sendMessage(prompt) }
+        Task {
+            let sent = await chatViewModel.sendMessage(prompt)
+            if !sent { restoreComposer(text: prompt, attachments: []) }
+        }
+    }
+
+    /// Put a failed draft back so the user can retry. Only restores while the
+    /// composer is still empty — never clobbers something newly typed.
+    private func restoreComposer(text: String, attachments failed: [AttachmentItem]) {
+        guard messageText.trimmed.isEmpty, attachments.isEmpty else { return }
+        messageText = text
+        attachments = failed
     }
 
     /// Extract text from an attached document off the main thread, then ask the AI
@@ -632,16 +692,13 @@ struct ChatView: View {
         chatViewModel.deleteMessage(messageId: messageId)
     }
 
-    /// Regenerate an assistant reply by re-sending the user prompt that preceded it.
+    /// Regenerate an assistant reply in place. The ViewModel reuses the preceding
+    /// user turn (text AND attached image) without re-appending the user bubble —
+    /// re-sending through sendMessage duplicated the message on every regenerate.
     private func regenerate(after assistantMessage: ChatMessage, in session: ChatSession) {
         guard !chatViewModel.isSending, !isProcessingDocument else { return }
-        guard let idx = session.messages.firstIndex(where: { $0.id == assistantMessage.id }) else { return }
-        let precedingPrompt = session.messages[..<idx]
-            .last(where: { $0.role == .user && !$0.content.trimmed.isEmpty })?
-            .content.trimmed
-        guard let prompt = precedingPrompt, !prompt.isEmpty else { return }
         HapticFeedback.light()
-        Task { await chatViewModel.sendMessage(prompt) }
+        Task { await chatViewModel.regenerateResponse(for: assistantMessage.id) }
     }
 
     // MARK: - Speech Recognition
@@ -687,22 +744,25 @@ struct ChatView: View {
         // Create and start recognition task
         recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { result, error in
             var isFinal = false
-            
+
             if let result = result {
                 DispatchQueue.main.async {
                     self.messageText = result.bestTranscription.formattedString
                 }
                 isFinal = result.isFinal
             }
-            
+
             if error != nil || isFinal {
                 self.audioEngine.stop()
                 inputNode.removeTap(onBus: 0)
-                
-                self.recognitionRequest = nil
-                self.recognitionTask = nil
-                
+                // Release the .record session, or every other audio source
+                // (including other apps) stays ducked after dictation ends.
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+
+                // @State must only be mutated on the main thread.
                 DispatchQueue.main.async {
+                    self.recognitionRequest = nil
+                    self.recognitionTask = nil
                     self.isRecording = false
                 }
             }
@@ -725,6 +785,27 @@ struct ChatView: View {
         audioEngine.stop()
         recognitionRequest?.endAudio()
         isRecording = false
+    }
+}
+
+// MARK: - Keyboard dismissal on scroll
+
+private extension View {
+    /// Interactive keyboard dismissal on iOS 16+, with a drag-gesture fallback on
+    /// iOS 15 (the gesture competes with the ScrollView's pan, so it's fallback-only).
+    @ViewBuilder
+    func dismissKeyboardOnScroll(isFocused: FocusState<Bool>.Binding) -> some View {
+        if #available(iOS 16.0, *) {
+            self.scrollDismissesKeyboard(.interactively)
+        } else {
+            self.simultaneousGesture(
+                DragGesture().onChanged { _ in
+                    if isFocused.wrappedValue {
+                        isFocused.wrappedValue = false
+                    }
+                }
+            )
+        }
     }
 }
 

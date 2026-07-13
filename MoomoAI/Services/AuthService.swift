@@ -114,6 +114,18 @@ final class AuthService: NSObject, ObservableObject {
     }
 
     func deleteAccount() async -> Bool {
+        // Wipe server-side data first (Firestore tree, usage counter, generation
+        // log, generated images) via the deleteUserData Cloud Function — deleting
+        // only the Auth user would orphan all of it. Best-effort: if the wipe
+        // fails (e.g. function not yet deployed), account deletion still proceeds
+        // so the user-facing promise is kept.
+        do {
+            try await GenerationService.shared.deleteUserData()
+        } catch {
+            #if DEBUG
+            print("AUTH deleteUserData error=\(error.localizedDescription)")
+            #endif
+        }
         do { try await Auth.auth().currentUser?.delete(); return true }
         catch { setError(error.localizedDescription); return false }
     }

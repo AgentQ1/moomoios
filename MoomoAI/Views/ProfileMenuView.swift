@@ -26,7 +26,7 @@ struct ProfileMenuView: View {
                         HStack(spacing: 12) {
                             // Avatar
                             if let pictureURL = user.picture, let url = URL(string: pictureURL) {
-                                AsyncImage(url: url) { image in
+                                CachedAsyncImage(url: url) { image in
                                     image
                                         .resizable()
                                         .scaledToFill()
@@ -69,30 +69,6 @@ struct ProfileMenuView: View {
                             }
                         }
                         .padding(.vertical, 8)
-                    }
-                    
-                    // Stats section
-                    Section("Activity") {
-                        HStack {
-                            Label("Total Messages", systemImage: "bubble.left.and.bubble.right")
-                            Spacer()
-                            Text("\(user.totalMessages)")
-                                .foregroundColor(K.Colors.textSecondary)
-                        }
-                        
-                        HStack {
-                            Label("Sessions", systemImage: "clock")
-                            Spacer()
-                            Text("\(user.totalSessions)")
-                                .foregroundColor(K.Colors.textSecondary)
-                        }
-                        
-                        HStack {
-                            Label("Searches", systemImage: "magnifyingglass")
-                            Spacer()
-                            Text("\(user.totalSearches)")
-                                .foregroundColor(K.Colors.textSecondary)
-                        }
                     }
                     
                     // Personalization & Memory

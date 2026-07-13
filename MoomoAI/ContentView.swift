@@ -27,15 +27,18 @@ struct ContentView: View {
         .preferredColorScheme(.light)
         // Reset transient UI on every auth transition so a fresh login always
         // opens to the home chat with the sidebar closed (no stale drawer state),
-        // and a new user never inherits the previous account's chats.
-        .onChange(of: authService.isSignedIn) { signedIn in
+        // and a new user never inherits the previous account's chats. Keyed on
+        // the uid (not isSignedIn) so guest → account switches are caught too.
+        .onChange(of: authService.currentUser?.id) { uid in
             showSidebar = false
             showLanguageSelection = false
-            if signedIn {
-                chatViewModel.handleSignIn()
-            } else {
-                chatViewModel.handleSignOut()
-            }
+            chatViewModel.handleAuthChange(uid: uid)
+        }
+        // The auth listener can restore a persisted session before this view is
+        // installed, in which case onChange never observes the transition —
+        // reconcile once at appear so the cloud chat list always syncs.
+        .onAppear {
+            chatViewModel.handleAuthChange(uid: authService.currentUser?.id)
         }
     }
 
