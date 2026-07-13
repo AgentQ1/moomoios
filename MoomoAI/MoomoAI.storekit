@@ -31,11 +31,15 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "4.99",
+          "displayPrice" : "29.99",
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "40218751",
-          "introductoryOffer" : null,
+          "introductoryOffer" : {
+            "internalID" : "40218752",
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P3D"
+          },
           "localizations" : [
             {
               "description" : "Unlimited AI chat, images, files & search",

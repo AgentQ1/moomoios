@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "moomoios-2026"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moomo AI — Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    max-width: 720px; margin: 0 auto; padding: 32px 20px 64px;
+    line-height: 1.6; color: #1d1d1f; background: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f2f2f7; background: #101014; }
+    a { color: #7ab8ff; }
+  }
+  h1 { font-size: 1.7em; margin-bottom: 0.2em; }
+  h2 { font-size: 1.2em; margin-top: 1.8em; }
+  .meta { opacity: 0.7; font-size: 0.95em; }
+  ul { padding-left: 1.2em; }
+  li { margin: 0.3em 0; }
+</style>
+</head>
+<body>
+<h1>Moomo AI — Privacy Policy</h1>
+<p class="meta">Effective date: July 13, 2026 · Moomolab LLC · Applies to the Moomo AI iOS app (bundle ID <code>com.moomolab.moomo</code>)</p>
+
+<h2>Summary</h2>
+<ul>
+  <li>Moomo AI shows <strong>no advertisements</strong> and contains <strong>no advertising or analytics SDKs</strong>.</li>
+  <li>We do <strong>not</strong> use Google Analytics, Firebase Analytics, Google Ads, AdMob, or any conversion-measurement or attribution technology.</li>
+  <li>We do <strong>not</strong> track you across apps or websites, do <strong>not</strong> access the advertising identifier (IDFA), and therefore never show an App Tracking Transparency prompt.</li>
+  <li>We do <strong>not</strong> sell your personal information, and we do not share it for advertising or marketing.</li>
+  <li>Data we do collect exists only to run the service: your account, your conversations, your generated images, your subscription status, and daily usage counts.</li>
+</ul>
+
+<h2>1. Information we collect</h2>
+<ul>
+  <li><strong>Account information.</strong> If you sign in with Apple or Google: your email address and display name, held in Firebase Authentication. Guest mode requires no email or name.</li>
+  <li><strong>User ID.</strong> A Firebase Authentication user ID (UID) that keys your data and enforces per-account quotas (all modes, including guest).</li>
+  <li><strong>Device / installation identifier.</strong> Firebase issues a Firebase Installation ID (FID) per app install. It is used solely for service infrastructure and security (for example, App Check and request routing) — never for advertising or tracking.</li>
+  <li><strong>Prompts and conversations.</strong> Text you send to the AI, stored on your device and, server-side, in our generation log and your account's memory so the service can function and abuse can be audited.</li>
+  <li><strong>Photos you attach.</strong> Sent transiently to generate a response; attached input photos are not persisted on our servers.</li>
+  <li><strong>Generated images.</strong> Stored in your account's private storage area until you delete your account.</li>
+  <li><strong>Purchase history.</strong> If you subscribe, Apple transaction identifiers and entitlement state, used only to grant premium access. Payments themselves are handled entirely by Apple; we never see payment card details.</li>
+  <li><strong>Usage counters.</strong> Daily request counts per account, used to enforce free-tier limits and premium fair-use limits.</li>
+  <li><strong>Voice dictation.</strong> Dictation is performed by Apple's on-device/OS speech service. The app never uploads or stores audio; only recognized text is used, and only if you send it.</li>
+</ul>
+
+<h2>2. What we do not collect</h2>
+<ul>
+  <li>No advertising data, no analytics events, no crash/diagnostics SDK data.</li>
+  <li>No location, contacts, browsing history, health, or financial data.</li>
+  <li>No advertising identifier (IDFA) and no cross-app or cross-site tracking of any kind.</li>
+</ul>
+
+<h2>3. How we use information</h2>
+<p>Only to operate the service: authenticate you, generate AI responses, store your content, enforce quotas, grant subscription entitlements, prevent fraud and abuse, and comply with law. We do not use your data for advertising, ad targeting, or marketing, and we do not use your conversations to train AI models.</p>
+
+<h2>4. AI processing disclosure</h2>
+<p>Your prompts and attached images are processed by Google's Gemini API through our secure backend (Firebase Cloud Functions) solely to generate the response you requested. API keys stay on the server; your content is transmitted over TLS.</p>
+
+<h2>5. Service providers</h2>
+<ul>
+  <li><strong>Google LLC — Firebase</strong> (Authentication, Firestore, Cloud Functions, Storage, App Check, Installations): hosting and infrastructure, US region (us-central1).</li>
+  <li><strong>Google LLC — Gemini API</strong>: AI model provider (prompts and attached images, processed transiently).</li>
+  <li><strong>Apple Inc.</strong>: payments (App Store / StoreKit), Sign in with Apple, OS dictation service.</li>
+  <li><strong>Google Sign-In / Sign in with Apple</strong>: authentication only (email, name).</li>
+</ul>
+<p>None of these integrations are used for advertising, analytics, attribution, or conversion measurement in Moomo AI.</p>
+
+<h2>6. Data storage and security</h2>
+<p>Data is stored in Moomolab's Firebase project in the United States. Access is restricted by default-deny security rules: your data is readable and writable only by your authenticated account, and sensitive records are writable only by our server code. All traffic is encrypted in transit.</p>
+
+<h2>7. Data retention and deletion</h2>
+<p>Your data is retained until you delete your account. Deleting your account in the app (Profile → Delete Account) removes your authentication record and wipes your server-side data: profile, conversations/memory, generation log, generated images, usage counters, and purchase-entitlement mappings. Apple retains its own transaction records under its policies. You can also delete conversations locally at any time.</p>
+
+<h2>8. Your rights</h2>
+<p>You may access your content in the app, delete it, or delete your entire account in the app. For any privacy request (access, deletion, correction, complaint), contact us at the address below and we will respond within 30 days. Depending on your jurisdiction (e.g., GDPR, CCPA), you may have additional rights to access, portability, correction, deletion, and objection; we honor these on request.</p>
+
+<h2>9. Cookies and local storage</h2>
+<p>The app stores your chat sessions and preferences locally on your device. The app does not use advertising or analytics cookies. This policy site itself sets no cookies and runs no analytics.</p>
+
+<h2>10. Children's privacy</h2>
+<p>Moomo AI is not directed at children under 13, and we do not knowingly collect personal information from children under 13. If you believe a child has provided us personal information, contact us and we will delete it.</p>
+
+<h2>11. International data transfers</h2>
+<p>Data is processed and stored in the United States. By using the service you understand your data is transferred to and processed in the US, subject to the safeguards of our service providers listed above.</p>
+
+<h2>12. Changes to this policy</h2>
+<p>We will post any changes on this page and update the effective date. Material changes will be highlighted in the app or on this page.</p>
+
+<h2>13. Contact</h2>
+<p>Moomolab LLC — <a href="mailto:moomolab@gmail.com">moomolab@gmail.com</a></p>
+</body>
+</html>

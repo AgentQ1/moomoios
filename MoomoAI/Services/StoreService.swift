@@ -19,7 +19,9 @@ final class StoreService: ObservableObject {
     static let shared = StoreService()
 
     /// Auto-renewable monthly subscription configured in App Store Connect
-    /// (subscription group "Moomo Premium", $4.99/month US).
+    /// (subscription group "Moomo Premium", $29.99/month US after a 3-day free
+    /// trial). Price and the trial offer are read live from StoreKit — never
+    /// hard-coded in UI — so this stays in sync with App Store Connect.
     static let monthlyProductID = "com.moomolab.moomo.premium.monthly"
 
     /// Local mirror of the verified StoreKit entitlement. UI gating only —
@@ -47,14 +49,15 @@ final class StoreService: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        // Only the transaction-updates listener starts at launch, so renewals,
+        // refunds, and Ask-to-Buy approvals are never missed. Product loading (a
+        // network fetch) is deferred to the paywall's `.task`, and the entitlement
+        // refresh runs on auth change (ContentView) — so the welcome screen makes
+        // no StoreKit call for a signed-out user.
         updatesTask = Task { [weak self] in
             for await update in Transaction.updates {
                 await self?.handle(update: update)
             }
-        }
-        Task {
-            await loadProducts()
-            await refreshEntitlements()
         }
     }
 

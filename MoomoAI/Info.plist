@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>moomo</string>
+	<string>Moomo</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>Moomo</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -24,19 +24,19 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>3</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Moomo AI needs access to your camera to take photos and scan documents.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Moomo AI needs access to your microphone for voice calls and speech recognition.</string>
+	<string>Moomo AI uses your microphone to dictate messages by voice.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Moomo AI needs to save images to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Moomo AI needs access to your photos to attach images to conversations.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Moomo AI uses speech recognition to transcribe your voice during calls.</string>
+	<string>Moomo AI uses speech recognition to turn your dictation into text.</string>
 	<key>UIAppFonts</key>
 	<array/>
 	<key>UIApplicationSceneManifest</key>

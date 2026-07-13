@@ -3,9 +3,10 @@
 //  MoomoAI
 //
 //  Full-screen, Gemini-style navigation drawer branded for Moomo. Sections:
-//  New chat, Search chats, Images, Library, Recent chats, and Profile/Settings
-//  pinned to the bottom. (Daily brief and Videos are intentionally hidden until
-//  those features ship.) Replaces the old half-width SidebarView.
+//  New chat, Temporary chat, Upgrade (hidden for Premium), Library, Recent
+//  chats, and Profile/Settings pinned to the bottom. (Daily brief and Videos
+//  are intentionally hidden until those features ship.) Replaces the old
+//  half-width SidebarView.
 //
 
 import SwiftUI
@@ -13,12 +14,14 @@ import SwiftUI
 struct FullScreenSidebarView: View {
     @EnvironmentObject var chatViewModel: ChatViewModel
     @EnvironmentObject var authService: AuthService
+    @EnvironmentObject var storeService: StoreService
     @Binding var showSidebar: Bool
     @Binding var showLanguageSelection: Bool
 
     @State private var searchText = ""
     @State private var showProfileMenu = false
     @State private var showLibrary = false
+    @State private var showUpgrade = false
     @State private var libraryFilter: LibraryFilter = .all
     @State private var showShareSheet = false
     @State private var shareURL: URL?
@@ -47,6 +50,7 @@ struct FullScreenSidebarView: View {
         .fullScreenCover(isPresented: $showLibrary) {
             LibraryView(initialFilter: libraryFilter)
         }
+        .sheet(isPresented: $showUpgrade) { PaywallView() }
         .sheet(isPresented: $showProfileMenu) { ProfileMenuView() }
         .sheet(isPresented: $showShareSheet) {
             if let shareURL { ShareSheet(items: [shareURL]) }
@@ -118,9 +122,11 @@ struct FullScreenSidebarView: View {
                 chatViewModel.createTemporarySession()
                 close()
             }
-            navRow(icon: "photo.on.rectangle.angled", title: "Images") {
-                libraryFilter = .images
-                showLibrary = true
+            // Always-visible Premium entry (before the free-query limit is
+            // hit); hidden once the user already has Premium. Opens the same
+            // paywall the 10-query daily gate presents.
+            if !storeService.isPremium {
+                upgradeRow
             }
             navRow(icon: "square.stack.3d.up", title: "Library") {
                 libraryFilter = .all
@@ -129,6 +135,41 @@ struct FullScreenSidebarView: View {
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
+    }
+
+    /// Premium entry — gold sparkle, luxury accent, always visible to free
+    /// users so upgrading never requires hitting the daily limit first.
+    private var upgradeRow: some View {
+        Button {
+            HapticFeedback.light()
+            showUpgrade = true
+        } label: {
+            HStack(spacing: 14) {
+                SparkleMark(color: K.Colors.gold, size: 18)
+                    .frame(width: 26)
+                Text("Upgrade")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(K.Colors.textPrimary)
+                Spacer()
+                Text("PREMIUM")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.6)
+                    .foregroundColor(K.Colors.gold)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule().stroke(K.Colors.gold.opacity(0.55), lineWidth: 1)
+                    )
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 13)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(K.Colors.gold.opacity(0.07))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SidebarRowButtonStyle())
     }
 
     private func navRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
@@ -353,6 +394,7 @@ struct FullScreenSidebarView_Previews: PreviewProvider {
         FullScreenSidebarView(showSidebar: .constant(true), showLanguageSelection: .constant(false))
             .environmentObject(ChatViewModel())
             .environmentObject(AuthService())
+            .environmentObject(StoreService.shared)
             .preferredColorScheme(.light)
     }
 }

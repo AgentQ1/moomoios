@@ -27,8 +27,8 @@ struct K {
         static let goldSoft = Color(hex: "D8C6A6")
         /// Royal blue — "Moomo" wordmark on the chat home.
         static let royalBlue = Color(hex: "2A3E86")
-        /// Royal purple — "Moomo" wordmark on the welcome screen.
-        static let royalPurple = Color(hex: "432874")
+        /// Primary brand navy — welcome-screen wordmark, inline-code ink.
+        static let brandNavy = Color(hex: "253B86")
         /// Blue-grey — timestamps and read receipts.
         static let slate = Color(hex: "8C93A3")
 
@@ -57,12 +57,15 @@ struct K {
     }
 
     // MARK: - Legal (shown on the Premium paywall; required by App Review)
+    // Hosted on this app's own Firebase project (moomoios-2026); the same
+    // documents are bundled in-app via LegalDocuments. Keep these URLs in sync
+    // with the App Store Connect privacy-policy field and public/*.html.
     struct Legal {
-        /// Apple's standard EULA — acceptable Terms of Use for auto-renewable
-        /// subscriptions per App Review Guideline 3.1.2.
-        static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
-        /// Hosted Moomo privacy policy (same URL as ProfileMenuView and the App
-        /// Store Connect privacy-policy field — keep the three in sync).
-        static let privacyPolicyURL = URL(string: "https://moomopro-72876.web.app/privacy-policy.html")!
+        /// Moomo Terms of Service — also serves as the EULA for auto-renewable
+        /// subscriptions per App Review Guideline 3.1.2 (includes renewal,
+        /// cancellation, restore, and fair-use terms).
+        static let termsOfUseURL = URL(string: "https://moomoios-2026.web.app/terms-of-service.html")!
+        /// Hosted Moomo privacy policy.
+        static let privacyPolicyURL = URL(string: "https://moomoios-2026.web.app/privacy-policy.html")!
     }
 }

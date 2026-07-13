@@ -280,7 +280,7 @@ enum AttachmentType {
     
     var color: Color {
         switch self {
-        case .image: return .purple
+        case .image: return K.Colors.brandNavy
         case .video: return .pink
         case .document: return .blue
         case .pdf: return .red

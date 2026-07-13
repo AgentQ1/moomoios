@@ -24,8 +24,17 @@ final class AuthService: NSObject, ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
+    /// Consent method ("google" / "apple" / "guest") staged by the welcome
+    /// screen when the user taps a sign-in option with the legal checkbox
+    /// checked. It is recorded (with the current document versions) only once
+    /// the sign-in actually succeeds, so cancelling or failing authentication
+    /// never persists consent.
+    var pendingConsentMethod: String?
+
     private var stateHandle: AuthStateDidChangeListenerHandle?
-    private var appleNonce: String?
+    /// Resumed by the ASAuthorizationController delegate so the Apple flow can be
+    /// awaited — used for both first-time sign-in and delete-time re-authentication.
+    private var appleAuthContinuation: CheckedContinuation<ASAuthorizationAppleIDCredential, Error>?
 
     override init() {
         super.init()
@@ -55,10 +64,13 @@ final class AuthService: NSObject, ObservableObject {
     // MARK: - Guest
 
     func continueAsGuest() {
+        guard !isLoading else { return }
         isLoading = true
         Task { @MainActor in
-            do { _ = try await Auth.auth().signInAnonymously() }
-            catch { fail(error) }
+            do {
+                _ = try await Auth.auth().signInAnonymously()
+                recordPendingConsent()
+            } catch { fail(error) }
             isLoading = false
         }
     }
@@ -66,6 +78,9 @@ final class AuthService: NSObject, ObservableObject {
     // MARK: - Google
 
     func signInWithGoogle() {
+        // A sign-in is already presenting — don't launch a second Google
+        // (ASWebAuthenticationSession) flow on top of it.
+        guard !isLoading else { return }
         guard let clientID = FirebaseApp.app()?.options.clientID,
               let root = Self.rootViewController() else {
             setError("Google Sign-In is not configured."); return
@@ -91,17 +106,47 @@ final class AuthService: NSObject, ObservableObject {
     // MARK: - Apple
 
     func signInWithApple() {
+        guard !isLoading else { return }
+        isLoading = true
+        Task { @MainActor in
+            do {
+                let (appleCredential, nonce) = try await requestAppleCredential()
+                guard let tokenData = appleCredential.identityToken,
+                      let idToken = String(data: tokenData, encoding: .utf8) else {
+                    fail(AuthError.message("Apple Sign-In failed.")); return
+                }
+                let credential = OAuthProvider.appleCredential(
+                    withIDToken: idToken, rawNonce: nonce, fullName: appleCredential.fullName)
+                await completeSignIn(with: credential)
+            } catch {
+                // A user-cancelled sheet is not an error worth surfacing, but it
+                // must still clear any staged consent and the loading state.
+                if isUserCancellation(error) {
+                    pendingConsentMethod = nil
+                    isLoading = false
+                } else {
+                    fail(error)
+                }
+            }
+        }
+    }
+
+    /// Presents Sign in with Apple and returns the raw Apple ID credential along
+    /// with the nonce requested with it. Backs both first-time sign-in and the
+    /// re-authentication performed during account deletion.
+    private func requestAppleCredential() async throws -> (credential: ASAuthorizationAppleIDCredential, nonce: String) {
         let nonce = Self.randomNonceString()
-        appleNonce = nonce
         let request = ASAuthorizationAppleIDProvider().createRequest()
         request.requestedScopes = [.fullName, .email]
         request.nonce = Self.sha256(nonce)
-
         let controller = ASAuthorizationController(authorizationRequests: [request])
         controller.delegate = self
         controller.presentationContextProvider = self
-        isLoading = true
-        controller.performRequests()
+        let credential = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ASAuthorizationAppleIDCredential, Error>) in
+            appleAuthContinuation = cont
+            controller.performRequests()
+        }
+        return (credential, nonce)
     }
 
     // MARK: - Sign out / delete
@@ -114,11 +159,18 @@ final class AuthService: NSObject, ObservableObject {
     }
 
     func deleteAccount() async -> Bool {
-        // Wipe server-side data first (Firestore tree, usage counter, generation
-        // log, generated images) via the deleteUserData Cloud Function — deleting
-        // only the Auth user would orphan all of it. Best-effort: if the wipe
-        // fails (e.g. function not yet deployed), account deletion still proceeds
-        // so the user-facing promise is kept.
+        guard !isLoading, let user = Auth.auth().currentUser else { return false }
+        isLoading = true
+        defer { isLoading = false }
+
+        let providerIDs = user.providerData.map { $0.providerID }
+        let isApple = providerIDs.contains("apple.com")
+        let isGoogle = providerIDs.contains("google.com")
+
+        // 1. Wipe server-side data first (Firestore tree, usage counter, generation
+        //    log, generated images) via the deleteUserData Cloud Function — deleting
+        //    only the Auth user would orphan all of it. Best-effort and idempotent:
+        //    if the wipe fails, deletion still proceeds so the promise is kept.
         do {
             try await GenerationService.shared.deleteUserData()
         } catch {
@@ -126,8 +178,111 @@ final class AuthService: NSObject, ObservableObject {
             print("AUTH deleteUserData error=\(error.localizedDescription)")
             #endif
         }
-        do { try await Auth.auth().currentUser?.delete(); return true }
-        catch { setError(error.localizedDescription); return false }
+
+        // 2. Sign in with Apple requires the token be revoked on deletion (App
+        //    Review Guideline 5.1.1(v)). Re-authenticating up front yields a fresh
+        //    authorization code to revoke AND satisfies Firebase's recent-login
+        //    requirement, so the delete below succeeds without a retry.
+        do {
+            var appleAuthCode: String?
+            if isApple {
+                appleAuthCode = try await reauthenticateWithApple(user)
+            }
+            try await finalizeDeletion(user, isApple: isApple, appleAuthCode: appleAuthCode)
+            return true
+        } catch {
+            // 3. Firebase demands a recent login (typical for Google / guest, or if
+            //    the proactive Apple re-auth was skipped) — re-authenticate with the
+            //    user's provider and retry once.
+            guard AuthErrorCode(rawValue: (error as NSError).code) == .requiresRecentLogin else {
+                return handleDeletionFailure(error)
+            }
+            do {
+                var appleAuthCode: String?
+                if isApple {
+                    appleAuthCode = try await reauthenticateWithApple(user)
+                } else if isGoogle {
+                    _ = try await user.reauthenticate(with: googleCredential())
+                } else {
+                    throw AuthError.message("Please sign in again, then retry deleting your account.")
+                }
+                try await finalizeDeletion(user, isApple: isApple, appleAuthCode: appleAuthCode)
+                return true
+            } catch {
+                return handleDeletionFailure(error)
+            }
+        }
+    }
+
+    /// Revokes the Sign in with Apple token (Guideline 5.1.1(v)) then deletes the
+    /// Firebase Auth user. Revocation is best-effort — the deletion the user
+    /// explicitly asked for must never be blocked by a revoke hiccup.
+    private func finalizeDeletion(_ user: FirebaseAuth.User, isApple: Bool, appleAuthCode: String?) async throws {
+        if isApple, let code = appleAuthCode {
+            do {
+                try await Auth.auth().revokeToken(withAuthorizationCode: code)
+            } catch {
+                #if DEBUG
+                print("AUTH revokeToken error=\(error.localizedDescription)")
+                #endif
+            }
+        }
+        try await user.delete()
+    }
+
+    /// Re-runs Sign in with Apple, reauthenticates the Firebase user with the fresh
+    /// credential, and returns the fresh authorization code used to revoke the token.
+    private func reauthenticateWithApple(_ user: FirebaseAuth.User) async throws -> String? {
+        let (appleCredential, nonce) = try await requestAppleCredential()
+        guard let tokenData = appleCredential.identityToken,
+              let idToken = String(data: tokenData, encoding: .utf8) else {
+            throw AuthError.message("Apple re-authentication failed.")
+        }
+        let credential = OAuthProvider.appleCredential(
+            withIDToken: idToken, rawNonce: nonce, fullName: appleCredential.fullName)
+        _ = try await user.reauthenticate(with: credential)
+        if let codeData = appleCredential.authorizationCode {
+            return String(data: codeData, encoding: .utf8)
+        }
+        return nil
+    }
+
+    /// Presents Google Sign-In and returns a fresh Firebase credential for re-auth.
+    private func googleCredential() async throws -> AuthCredential {
+        guard let clientID = FirebaseApp.app()?.options.clientID,
+              let root = Self.rootViewController() else {
+            throw AuthError.message("Google Sign-In is not configured.")
+        }
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+        let result: GIDSignInResult = try await withCheckedThrowingContinuation { cont in
+            GIDSignIn.sharedInstance.signIn(withPresenting: root) { signInResult, error in
+                if let error {
+                    cont.resume(throwing: error)
+                } else if let signInResult {
+                    cont.resume(returning: signInResult)
+                } else {
+                    cont.resume(throwing: AuthError.message("Google Sign-In failed."))
+                }
+            }
+        }
+        guard let idToken = result.user.idToken?.tokenString else {
+            throw AuthError.message("Google Sign-In failed.")
+        }
+        return GoogleAuthProvider.credential(
+            withIDToken: idToken, accessToken: result.user.accessToken.tokenString)
+    }
+
+    private func handleDeletionFailure(_ error: Error) -> Bool {
+        setError(isUserCancellation(error) ? "Account deletion was canceled." : error.localizedDescription)
+        return false
+    }
+
+    private func isUserCancellation(_ error: Error) -> Bool {
+        if (error as? ASAuthorizationError)?.code == .canceled { return true }
+        let ns = error as NSError
+        // GoogleSignIn reports a cancelled flow as code -5 in its own error domain.
+        if ns.domain == "com.google.GIDSignIn", ns.code == -5 { return true }
+        return false
     }
 
     // MARK: - Shared credential handling
@@ -146,10 +301,22 @@ final class AuthService: NSObject, ObservableObject {
             do { _ = try await Auth.auth().signIn(with: credential) }
             catch { fail(error); return }
         }
+        recordPendingConsent()
         isLoading = false
     }
 
-    private func fail(_ error: Error) { setError(error.localizedDescription); isLoading = false }
+    /// Persists the staged legal consent after a successful sign-in.
+    private func recordPendingConsent() {
+        guard let method = pendingConsentMethod else { return }
+        LegalConsent.recordAcceptance(method: method)
+        pendingConsentMethod = nil
+    }
+
+    private func fail(_ error: Error) {
+        pendingConsentMethod = nil
+        setError(error.localizedDescription)
+        isLoading = false
+    }
     private func setError(_ message: String) { errorMessage = message }
 
     enum AuthError: LocalizedError {
@@ -163,24 +330,21 @@ final class AuthService: NSObject, ObservableObject {
 extension AuthService: ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     func authorizationController(controller: ASAuthorizationController,
                                  didCompleteWithAuthorization authorization: ASAuthorization) {
-        guard let applecredential = authorization.credential as? ASAuthorizationAppleIDCredential,
-              let nonce = appleNonce,
-              let tokenData = applecredential.identityToken,
-              let idToken = String(data: tokenData, encoding: .utf8) else {
-            fail(AuthError.message("Apple Sign-In failed.")); return
+        let continuation = appleAuthContinuation
+        appleAuthContinuation = nil
+        if let appleCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            continuation?.resume(returning: appleCredential)
+        } else {
+            continuation?.resume(throwing: AuthError.message("Apple Sign-In failed."))
         }
-        let credential = OAuthProvider.appleCredential(
-            withIDToken: idToken,
-            rawNonce: nonce,
-            fullName: applecredential.fullName
-        )
-        Task { @MainActor in await completeSignIn(with: credential) }
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-        // User cancellation is not an error worth surfacing.
-        if (error as? ASAuthorizationError)?.code == .canceled { isLoading = false; return }
-        fail(error)
+        // Cancellation vs. real failure is classified by the awaiting caller
+        // (signInWithApple / deleteAccount) — just forward the error here.
+        let continuation = appleAuthContinuation
+        appleAuthContinuation = nil
+        continuation?.resume(throwing: error)
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {

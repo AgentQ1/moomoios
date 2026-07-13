@@ -11,6 +11,12 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "cleanUrls": false,
+    "trailingSlash": false
+  },
   "emulators": {
     "auth": { "port": 9099 },
     "functions": { "port": 5001 },

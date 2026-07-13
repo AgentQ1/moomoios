@@ -201,7 +201,7 @@ enum MarkdownFormatter {
         }
         for range in ranges {
             text[range].font = .system(.callout, design: .monospaced)
-            text[range].foregroundColor = K.Colors.royalPurple
+            text[range].foregroundColor = K.Colors.brandNavy
             text[range].backgroundColor = K.Colors.backgroundSecondary
         }
     }

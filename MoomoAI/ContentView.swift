@@ -14,10 +14,21 @@ struct ContentView: View {
     @EnvironmentObject var chatViewModel: ChatViewModel
     @State private var showSidebar = false
     @State private var showLanguageSelection = false
+    // Legal gate: consent is recorded by AuthService when a sign-in succeeds
+    // from the welcome screen's checkbox flow. If either document's version is
+    // bumped, the stored values no longer match and even a signed-in returning
+    // user is routed back to the welcome screen for renewed acceptance.
+    @AppStorage(LegalConsent.acceptedPrivacyVersionKey) private var acceptedPrivacyVersion = ""
+    @AppStorage(LegalConsent.acceptedTermsVersionKey) private var acceptedTermsVersion = ""
+
+    private var hasCurrentLegalConsent: Bool {
+        acceptedPrivacyVersion == LegalDocuments.privacyPolicyVersion
+            && acceptedTermsVersion == LegalDocuments.termsOfServiceVersion
+    }
 
     var body: some View {
         Group {
-            if authService.isSignedIn {
+            if authService.isSignedIn && hasCurrentLegalConsent {
                 chatRoot
             } else {
                 LoginView()

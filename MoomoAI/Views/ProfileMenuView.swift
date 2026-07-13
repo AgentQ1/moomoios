@@ -16,6 +16,8 @@ struct ProfileMenuView: View {
     @State private var showDeleteAccountConfirmation = false
     @State private var showDeletionError = false
     @State private var deletionErrorMessage = ""
+    @State private var showPrivacyPolicy = false
+    @State private var showTermsOfService = false
     
     var body: some View {
         NavigationView {
@@ -80,13 +82,17 @@ struct ProfileMenuView: View {
                         }
                     }
 
-                    // Privacy section
+                    // Privacy section — bundled documents shown in-app.
                     Section("Privacy") {
-                        Link(destination: URL(string: "https://moomopro-72876.web.app/privacy-policy.html")!) {
+                        Button {
+                            showPrivacyPolicy = true
+                        } label: {
                             Label("Privacy Policy", systemImage: "hand.raised.fill")
                         }
-                        
-                        Link(destination: URL(string: "https://moomopro-72876.web.app/terms-of-service.html")!) {
+
+                        Button {
+                            showTermsOfService = true
+                        } label: {
                             Label("Terms of Service", systemImage: "doc.text.fill")
                         }
                     }
@@ -161,6 +167,18 @@ struct ProfileMenuView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(deletionErrorMessage)
+            }
+            .sheet(isPresented: $showPrivacyPolicy) {
+                LegalDocumentSheet(
+                    title: LegalDocuments.privacyPolicyTitle,
+                    text: LegalDocuments.privacyPolicy
+                )
+            }
+            .sheet(isPresented: $showTermsOfService) {
+                LegalDocumentSheet(
+                    title: LegalDocuments.termsOfServiceTitle,
+                    text: LegalDocuments.termsOfService
+                )
             }
         }
     }

@@ -18,6 +18,8 @@ struct PaywallView: View {
 
     @State private var appeared = false
     @State private var showManageSubscriptions = false
+    @State private var showPrivacyPolicy = false
+    @State private var showTermsOfUse = false
 
     var body: some View {
         ZStack {
@@ -39,6 +41,18 @@ struct PaywallView: View {
             }
         }
         .manageSubscriptionsSheet(isPresented: $showManageSubscriptions)
+        .sheet(isPresented: $showPrivacyPolicy) {
+            LegalDocumentSheet(
+                title: LegalDocuments.privacyPolicyTitle,
+                text: LegalDocuments.privacyPolicy
+            )
+        }
+        .sheet(isPresented: $showTermsOfUse) {
+            LegalDocumentSheet(
+                title: LegalDocuments.termsOfServiceTitle,
+                text: LegalDocuments.termsOfService
+            )
+        }
         .task {
             await storeService.loadProducts()
             withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
@@ -86,13 +100,13 @@ struct PaywallView: View {
                 .tracking(3.4)
                 .foregroundColor(K.Colors.gold)
 
-            Text("Your intelligence, without limits.")
+            Text("Upgrade to Moomo Premium")
                 .font(.system(size: 30, weight: .bold, design: .serif))
                 .foregroundColor(K.Colors.navy)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("You've experienced Moomo. Now unlock everything — unlimited access to Moomo's complete AI experience.")
+            Text("You get 10 free questions every day. Premium unlocks unlimited chat and Moomo's complete AI experience.")
                 .font(.system(size: 15.5))
                 .foregroundColor(K.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -113,13 +127,12 @@ struct PaywallView: View {
     }
 
     private let benefits: [Benefit] = [
-        .init(icon: "bubble.left.and.bubble.right.fill", text: "Unlimited AI conversations"),
-        .init(icon: "eye.fill", text: "Image understanding"),
-        .init(icon: "wand.and.stars", text: "Image creation and editing"),
-        .init(icon: "doc.text.magnifyingglass", text: "File analysis"),
-        .init(icon: "magnifyingglass", text: "Search"),
+        .init(icon: "bubble.left.and.bubble.right.fill", text: "Unlimited chat"),
+        .init(icon: "wand.and.stars", text: "Image generation and editing"),
+        .init(icon: "books.vertical.fill", text: "Library access for generated images and files"),
+        .init(icon: "bolt.fill", text: "Priority AI responses"),
         .init(icon: "brain.head.profile", text: "Personalization and memory"),
-        .init(icon: "books.vertical.fill", text: "Full Library and chat-history access"),
+        .init(icon: "doc.text.magnifyingglass", text: "File analysis"),
     ]
 
     private var benefitsCard: some View {
@@ -153,11 +166,49 @@ struct PaywallView: View {
 
     // MARK: - Purchase
 
-    private var priceLine: String {
-        if let product = storeService.monthlyProduct {
-            return "\(product.displayPrice)/month · Cancel anytime"
+    /// "3 days free" style phrase, derived from the product's actual StoreKit
+    /// introductory offer — nil unless a real free-trial offer is configured, so
+    /// the UI never advertises a trial that App Store Connect doesn't grant.
+    private var freeTrialPhrase: String? {
+        guard let offer = storeService.monthlyProduct?.subscription?.introductoryOffer,
+              offer.paymentMode == .freeTrial else { return nil }
+        let n = offer.period.value
+        let unit: String
+        switch offer.period.unit {
+        case .day:   unit = n == 1 ? "day" : "days"
+        case .week:  unit = n == 1 ? "week" : "weeks"
+        case .month: unit = n == 1 ? "month" : "months"
+        case .year:  unit = n == 1 ? "year" : "years"
+        @unknown default: unit = "days"
         }
-        return "Cancel anytime"
+        return "\(n) \(unit) free"
+    }
+
+    private var priceLine: String {
+        guard let product = storeService.monthlyProduct else { return "Cancel anytime" }
+        if let trial = freeTrialPhrase {
+            return "\(trial), then \(product.displayPrice)/month"
+        }
+        return "\(product.displayPrice)/month · Cancel anytime"
+    }
+
+    /// Purchase CTA — names the trial when one exists so the button itself sets
+    /// the expectation, per App Review guidance on introductory offers.
+    private var ctaTitle: String {
+        freeTrialPhrase != nil ? "Start Free Trial" : "Continue with Premium"
+    }
+
+    /// Auto-renewal disclosure required by App Review Guideline 3.1.2. Built from
+    /// the live StoreKit price so it always matches what Apple will charge.
+    private var renewalDisclosure: String {
+        let price = storeService.monthlyProduct?.displayPrice
+        if let trial = freeTrialPhrase, let price {
+            return "Free for your first \(trial.replacingOccurrences(of: " free", with: "")), then \(price) per month. The subscription auto-renews monthly and your Apple ID is charged \(price) unless you cancel at least 24 hours before the period ends. Manage or cancel anytime in your App Store settings."
+        }
+        if let price {
+            return "\(price) per month. The subscription auto-renews monthly and your Apple ID is charged \(price) unless you cancel at least 24 hours before the period ends. Manage or cancel anytime in your App Store settings."
+        }
+        return "The subscription auto-renews monthly until canceled. Manage or cancel anytime in your App Store settings."
     }
 
     private var purchaseBlock: some View {
@@ -179,7 +230,7 @@ struct PaywallView: View {
                         ProgressView()
                             .tint(K.Colors.cream)
                     } else {
-                        Text("Continue with Premium")
+                        Text(ctaTitle)
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundColor(K.Colors.cream)
                     }
@@ -191,6 +242,20 @@ struct PaywallView: View {
             Text(priceLine)
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundColor(K.Colors.slate)
+
+            // Auto-renewal disclosure required by App Review Guideline 3.1.2 —
+            // shown on the paywall itself, not only in the linked Terms.
+            Text(renewalDisclosure)
+                .font(.system(size: 11.5))
+                .foregroundColor(K.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Matches the fair-use clause in the Terms of Service.
+            Text("Unlimited chat is subject to a fair-use limit of 500 requests per day.")
+                .font(.system(size: 11.5))
+                .foregroundColor(K.Colors.textSecondary)
+                .multilineTextAlignment(.center)
 
             if let message = storeService.statusMessage {
                 Text(message)
@@ -228,10 +293,12 @@ struct PaywallView: View {
                     .foregroundColor(K.Colors.navyText)
             }
 
+            // Bundled documents shown in-app (K.Legal URLs stay the public,
+            // App Store Connect-facing copies of the same documents).
             HStack(spacing: 18) {
-                Link("Privacy Policy", destination: K.Legal.privacyPolicyURL)
+                Button("Privacy Policy") { showPrivacyPolicy = true }
                 Text("·").foregroundColor(K.Colors.slate)
-                Link("Terms of Use", destination: K.Legal.termsOfUseURL)
+                Button("Terms of Use") { showTermsOfUse = true }
             }
             .font(.system(size: 13))
             .foregroundColor(K.Colors.slate)
