@@ -13,12 +13,55 @@ struct SettingsView: View {
     // Shares the same UserDefaults key MemoryService reads from the ViewModel.
     @AppStorage("moomo.memoryEnabled") private var memoryEnabled = true
 
+    @ObservedObject private var storeService = StoreService.shared
     @State private var memory: UserMemory?
     @State private var isLoading = false
     @State private var showClearConfirmation = false
+    @State private var showPaywall = false
+    @State private var showManageSubscriptions = false
 
     var body: some View {
         List {
+            Section {
+                if storeService.isPremium {
+                    HStack {
+                        Label("Moomo Premium", systemImage: "sparkles")
+                        Spacer()
+                        Text("Active")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(K.Colors.gold)
+                    }
+                    Button {
+                        showManageSubscriptions = true
+                    } label: {
+                        Label("Manage Subscription", systemImage: "creditcard")
+                    }
+                } else {
+                    Button {
+                        showPaywall = true
+                    } label: {
+                        Label("Moomo Premium", systemImage: "sparkles")
+                    }
+                }
+                Button {
+                    Task { await storeService.restorePurchases() }
+                } label: {
+                    if storeService.isRestoring {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Restoring…").foregroundColor(.secondary)
+                        }
+                    } else {
+                        Label("Restore Purchases", systemImage: "arrow.clockwise")
+                    }
+                }
+                .disabled(storeService.isRestoring)
+            } footer: {
+                if let message = storeService.statusMessage {
+                    Text(message)
+                }
+            }
+
             Section {
                 Toggle(isOn: $memoryEnabled) {
                     Label("Memory", systemImage: "brain.head.profile")
@@ -65,8 +108,13 @@ struct SettingsView: View {
                 Text("Sensitive details are not stored unless you explicitly ask Moomo to remember them.")
             }
         }
-        .navigationTitle("Personalization")
+        .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+                .environmentObject(storeService)
+        }
+        .manageSubscriptionsSheet(isPresented: $showManageSubscriptions)
         .task { await reload() }
         .refreshable { await reload() }
         .confirmationDialog("Clear all stored memory?", isPresented: $showClearConfirmation, titleVisibility: .visible) {

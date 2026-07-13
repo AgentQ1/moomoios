@@ -24,7 +24,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>5</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Moomo AI needs access to your camera to take photos and scan documents.</string>
 	<key>NSMicrophoneUsageDescription</key>

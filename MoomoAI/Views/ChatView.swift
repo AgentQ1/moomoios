@@ -122,6 +122,13 @@ struct ChatView: View {
         } message: {
             Text(unsupportedFileMessage)
         }
+        // Moomo Premium paywall — presented when the free daily allowance is
+        // spent. The draft and attachments underneath are never touched;
+        // dismissing simply returns to this chat.
+        .sheet(isPresented: $chatViewModel.showPaywall) {
+            PaywallView()
+                .environmentObject(StoreService.shared)
+        }
         .onChange(of: chatViewModel.currentSession?.id) { _ in
             // Dismiss keyboard when switching to a new session
             isInputFocused = false
@@ -540,6 +547,13 @@ struct ChatView: View {
             return
         }
 
+        // Free-quota preflight: when the daily allowance is already spent, the
+        // paywall is presented WITHOUT touching the composer — the typed prompt
+        // and attachments stay exactly as they are, and no request is started.
+        if chatViewModel.blockAndShowPaywallIfOutOfQuota() {
+            return
+        }
+
         let prompt = messageText.trimmed
         let imageAttachments = attachments.filter { $0.isSupportedImage }
 
@@ -550,7 +564,13 @@ struct ChatView: View {
             let path = target.path
             clearComposer()
             HapticFeedback.light()
-            Task { await chatViewModel.sendImageEdit(prompt: prompt, targetPath: path, sourceCaption: caption) }
+            Task {
+                let ok = await chatViewModel.sendImageEdit(prompt: prompt, targetPath: path, sourceCaption: caption)
+                if !ok {
+                    restoreComposer(text: prompt, attachments: [])
+                    editingImage = target
+                }
+            }
             return
         }
 
@@ -561,7 +581,13 @@ struct ChatView: View {
             let instruction = prompt.isEmpty ? "Edit this image" : prompt
             clearComposer()
             HapticFeedback.light()
-            Task { await chatViewModel.sendImageEdit(prompt: instruction, attachment: imageAttachment) }
+            Task {
+                let ok = await chatViewModel.sendImageEdit(prompt: instruction, attachment: imageAttachment)
+                if !ok {
+                    restoreComposer(text: prompt, attachments: [imageAttachment])
+                    imageMode = true
+                }
+            }
             return
         }
 
@@ -590,7 +616,13 @@ struct ChatView: View {
             guard !prompt.isEmpty else { return }
             clearComposer()
             HapticFeedback.light()
-            Task { await chatViewModel.sendImagePrompt(prompt) }
+            Task {
+                let ok = await chatViewModel.sendImagePrompt(prompt)
+                if !ok {
+                    restoreComposer(text: prompt, attachments: [])
+                    imageMode = true
+                }
+            }
             return
         }
 
@@ -640,7 +672,8 @@ struct ChatView: View {
                     try DocumentProcessor.extractText(from: data, fileName: name, mimeType: mime)
                 }.value
                 isProcessingDocument = false
-                await chatViewModel.sendDocumentPrompt(question: question, document: extracted, attachment: document)
+                let ok = await chatViewModel.sendDocumentPrompt(question: question, document: extracted, attachment: document)
+                if !ok { restoreComposer(text: question, attachments: [document]) }
             } catch {
                 isProcessingDocument = false
                 unsupportedFileMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn’t read this document."

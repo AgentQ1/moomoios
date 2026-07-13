@@ -16,6 +16,10 @@ struct GenerationResult: Identifiable, Equatable {
     let url: String?      // image download URL for image / image_edit
     let path: String?     // Storage path, used as the source for image edits
     let createdAt: String
+    /// Free queries consumed today, echoed by the backend for free users only
+    /// (nil for Premium). Used to preflight the paywall — never shown in UI.
+    let freeQueriesUsedToday: Int?
+    let freeDailyLimit: Int?
 
     /// Parse the clean JSON returned by the callable Cloud Functions.
     init?(from data: [String: Any]) {
@@ -28,5 +32,7 @@ struct GenerationResult: Identifiable, Equatable {
         self.url = data["url"] as? String
         self.path = data["path"] as? String
         self.createdAt = data["createdAt"] as? String ?? ""
+        self.freeQueriesUsedToday = data["freeQueriesUsedToday"] as? Int
+        self.freeDailyLimit = data["freeDailyLimit"] as? Int
     }
 }

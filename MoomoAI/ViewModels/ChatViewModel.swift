@@ -32,9 +32,19 @@ class ChatViewModel: ObservableObject {
     @Published var isSending = false   // True while any generation request is in flight (duplicate-send guard)
     @Published var selectedLanguage: Language = Language.defaultLanguage
     @Published var selectedModel: AIModel = .Q1 // Default to Q1
+    /// Presents the Moomo Premium paywall. Set when a free user attempts a
+    /// query past the daily allowance — the draft and attachments stay intact.
+    @Published var showPaywall = false
 
     private let persistence = PersistenceService.shared
     private let generation = GenerationService.shared
+
+    /// Free-quota hint echoed by the backend on each successful free query
+    /// (never displayed). Lets the composer block query 11 locally, before any
+    /// message is added or network call made. The backend remains authoritative.
+    private var freeQueriesUsedToday: Int?
+    private var freeDailyLimit = 10
+    private var usageDayKey: String?
 
     /// uid the view model is currently operating for; drives auth transitions
     /// (including guest → different-account switches where isSignedIn never flips).
@@ -225,6 +235,67 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Free quota / paywall
+
+    /// Composer preflight: true when the free allowance is already spent, in
+    /// which case the paywall is presented and the caller must NOT clear the
+    /// composer or start a request. Premium users are never blocked here.
+    func blockAndShowPaywallIfOutOfQuota() -> Bool {
+        guard !StoreService.shared.isPremium else { return false }
+        guard usageDayKey == Self.utcDayKey() else { return false } // stale = let the backend decide
+        if let used = freeQueriesUsedToday, used >= freeDailyLimit {
+            showPaywall = true
+            return true
+        }
+        return false
+    }
+
+    /// Record the backend's usage echo from a successful free-tier response.
+    private func recordUsage(_ result: GenerationResult) {
+        guard let used = result.freeQueriesUsedToday else { return } // Premium: no counter
+        freeQueriesUsedToday = used
+        if let limit = result.freeDailyLimit { freeDailyLimit = limit }
+        usageDayKey = Self.utcDayKey()
+    }
+
+    private static func utcDayKey() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter.string(from: Date())
+    }
+
+    /// Run one generation attempt. If the backend reports the free quota spent
+    /// while StoreKit locally shows an active subscription, the backend
+    /// entitlement is stale (fresh install, missed renewal event) — re-sync it
+    /// once and retry the SAME request id, which cannot double-consume quota.
+    private func runQuotaGated<T>(_ op: () async throws -> T) async throws -> T {
+        do {
+            return try await op()
+        } catch GenerationService.GenerationError.freeQuotaExhausted where StoreService.shared.isPremium {
+            await StoreService.shared.syncEntitlementWithBackend()
+            return try await op()
+        }
+    }
+
+    /// Undo the optimistic UI for a quota-blocked send: remove the typing
+    /// indicator and the just-added user bubble (local + Firestore), remember
+    /// the quota is spent, and present the paywall. No error bubble, no
+    /// duplicate message — the caller restores the composer draft.
+    private func unwindBlockedSend(session: inout ChatSession, userMessageId: String, conversationId: String, isTemporary: Bool) {
+        if session.messages.last?.isTyping == true {
+            session.messages.removeLast()
+        }
+        session.messages.removeAll { $0.id == userMessageId }
+        updateSession(session)
+        if !isTemporary {
+            MemoryService.shared.deleteMessage(conversationId: conversationId, messageId: userMessageId)
+        }
+        freeQueriesUsedToday = freeDailyLimit
+        usageDayKey = Self.utcDayKey()
+        showPaywall = true
+    }
+
     // MARK: - Message Handling
 
     /// Send a chat message — text-only, image-only, or text + attached images —
@@ -288,15 +359,21 @@ class ChatViewModel: ObservableObject {
 
             // Real generation via shared service (Cloud Functions + Gemini). The
             // backend assembles the system instruction from language + memory and
-            // places image parts and text in the same model request.
-            let response = try await generation.generateText(
-                message: messageText,
-                history: history,
-                memory: memoryText,
-                language: selectedLanguage.name,
-                languageCode: selectedLanguage.code,
-                images: images
-            )
+            // places image parts and text in the same model request. One stable
+            // request id per logical send: retries can never consume two queries.
+            let requestId = UUID().uuidString
+            let response = try await runQuotaGated {
+                try await generation.generateText(
+                    message: messageText,
+                    history: history,
+                    memory: memoryText,
+                    language: selectedLanguage.name,
+                    languageCode: selectedLanguage.code,
+                    images: images,
+                    requestId: requestId
+                )
+            }
+            recordUsage(response)
 
             // Remove typing indicator and add response
             session.messages.removeLast()
@@ -307,6 +384,9 @@ class ChatViewModel: ObservableObject {
             scheduleMemoryUpdate(messages: session.messages, isTemporary: isTemp)
             return true
 
+        } catch GenerationService.GenerationError.freeQuotaExhausted {
+            unwindBlockedSend(session: &session, userMessageId: userMessage.id, conversationId: conversationId, isTemporary: isTemp)
+            return false
         } catch {
             handleGenerationError(error, session: &session, imagesAttached: !images.isEmpty)
             return false
@@ -337,6 +417,9 @@ class ChatViewModel: ObservableObject {
         let isTemp = session.isTemporary
         let history = recentHistory(from: Array(session.messages[..<userIndex]))
 
+        // Keep the original reply so a quota-blocked regenerate can restore it.
+        let originalMessage = session.messages[assistantIndex]
+
         // Swap the old reply for a typing indicator, in place.
         session.messages[assistantIndex] = ChatMessage(role: .assistant, content: "", isTyping: true)
         updateSession(session)
@@ -351,14 +434,19 @@ class ChatViewModel: ObservableObject {
                 images.append(.init(data: userImage, mimeType: "image/jpeg"))
             }
 
-            let response = try await generation.generateText(
-                message: userMessage.content,
-                history: history,
-                memory: memoryText,
-                language: selectedLanguage.name,
-                languageCode: selectedLanguage.code,
-                images: images
-            )
+            let requestId = UUID().uuidString
+            let response = try await runQuotaGated {
+                try await generation.generateText(
+                    message: userMessage.content,
+                    history: history,
+                    memory: memoryText,
+                    language: selectedLanguage.name,
+                    languageCode: selectedLanguage.code,
+                    images: images,
+                    requestId: requestId
+                )
+            }
+            recordUsage(response)
 
             // Keep the SAME message id so the Firestore copy is overwritten
             // instead of duplicated.
@@ -366,6 +454,13 @@ class ChatViewModel: ObservableObject {
             session.messages[assistantIndex] = assistantMessage
             updateSession(session)
             persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+        } catch GenerationService.GenerationError.freeQuotaExhausted {
+            // Put the original reply back untouched and offer Premium instead.
+            session.messages[assistantIndex] = originalMessage
+            updateSession(session)
+            freeQueriesUsedToday = freeDailyLimit
+            usageDayKey = Self.utcDayKey()
+            showPaywall = true
         } catch {
             // Put a friendly error where the typing indicator sits (same id, so
             // a later regenerate still targets one message).
@@ -377,10 +472,13 @@ class ChatViewModel: ObservableObject {
 
     /// Generate an image from a prompt, inline in the current chat conversation.
     /// Uses the existing `generateImage` Cloud Function via GenerationService.
-    func sendImagePrompt(_ promptText: String) async {
-        guard !isSending else { return }
+    /// Returns false ONLY when the free quota blocked the request (the caller
+    /// restores the composer; the paywall is already presented).
+    @discardableResult
+    func sendImagePrompt(_ promptText: String) async -> Bool {
+        guard !isSending else { return true }
         guard var session = currentSession else {
-            return
+            return true
         }
         isSending = true
         defer { isSending = false }
@@ -400,7 +498,11 @@ class ChatViewModel: ObservableObject {
         updateSession(session)
 
         do {
-            let result = try await generation.generateImage(promptText)
+            let requestId = UUID().uuidString
+            let result = try await runQuotaGated {
+                try await generation.generateImage(promptText, requestId: requestId)
+            }
+            recordUsage(result)
 
             // Remove typing indicator and add the image result as an assistant bubble.
             // The image keeps the originating prompt (caption) + Storage path so it
@@ -419,17 +521,22 @@ class ChatViewModel: ObservableObject {
             persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
             logImageAsset(assistantMessage, type: .generatedImage, prompt: promptText, conversation: session, isTemporary: isTemp)
 
+        } catch GenerationService.GenerationError.freeQuotaExhausted {
+            unwindBlockedSend(session: &session, userMessageId: userMessage.id, conversationId: conversationId, isTemporary: isTemp)
+            return false
         } catch {
             handleGenerationError(error, session: &session)
         }
-
+        return true
     }
 
     /// Edit a previously generated image (follow-up like "make it darker") using
     /// its Storage path, so the change refers to the right image in this thread.
-    func sendImageEdit(prompt promptText: String, targetPath: String, sourceCaption: String?) async {
-        guard !isSending else { return }
-        guard var session = currentSession else { return }
+    /// Returns false ONLY when the free quota blocked the request.
+    @discardableResult
+    func sendImageEdit(prompt promptText: String, targetPath: String, sourceCaption: String?) async -> Bool {
+        guard !isSending else { return true }
+        guard var session = currentSession else { return true }
         isSending = true
         defer { isSending = false }
 
@@ -446,7 +553,11 @@ class ChatViewModel: ObservableObject {
         updateSession(session)
 
         do {
-            let result = try await generation.editImage(path: targetPath, instruction: promptText)
+            let requestId = UUID().uuidString
+            let result = try await runQuotaGated {
+                try await generation.editImage(path: targetPath, instruction: promptText, requestId: requestId)
+            }
+            recordUsage(result)
             session.messages.removeLast()
             // Caption carries forward the edit lineage so the image stays self-describing.
             let caption = sourceCaption.map { "\($0) · \(promptText)" } ?? promptText
@@ -462,19 +573,24 @@ class ChatViewModel: ObservableObject {
             updateSession(session)
             persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
             logImageAsset(assistantMessage, type: .editedImage, prompt: caption, conversation: session, isTemporary: isTemp)
+        } catch GenerationService.GenerationError.freeQuotaExhausted {
+            unwindBlockedSend(session: &session, userMessageId: userMessage.id, conversationId: conversationId, isTemporary: isTemp)
+            return false
         } catch {
             handleGenerationError(error, session: &session)
         }
-
+        return true
     }
 
     /// Edit an attached/photo image using a text instruction, inline in chat.
     /// Routes through the existing `editGeneratedImage` Cloud Function (NOT generateImage),
     /// sending the attached image bytes alongside the prompt.
-    func sendImageEdit(prompt promptText: String, attachment: AttachmentItem) async {
-        guard !isSending else { return }
+    /// Returns false ONLY when the free quota blocked the request.
+    @discardableResult
+    func sendImageEdit(prompt promptText: String, attachment: AttachmentItem) async -> Bool {
+        guard !isSending else { return true }
         guard var session = currentSession else {
-            return
+            return true
         }
         isSending = true
         defer { isSending = false }
@@ -497,7 +613,11 @@ class ChatViewModel: ObservableObject {
         do {
             // Send a size-bounded JPEG of the attached image so the callable payload stays small.
             let payload = attachment.thumbnailJPEGData(maxDimension: 1024) ?? attachment.data
-            let result = try await generation.editImage(imageData: payload, mimeType: "image/jpeg", instruction: promptText)
+            let requestId = UUID().uuidString
+            let result = try await runQuotaGated {
+                try await generation.editImage(imageData: payload, mimeType: "image/jpeg", instruction: promptText, requestId: requestId)
+            }
+            recordUsage(result)
 
             session.messages.removeLast()
             let assistantMessage = ChatMessage(
@@ -513,19 +633,24 @@ class ChatViewModel: ObservableObject {
             persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
             logImageAsset(assistantMessage, type: .editedImage, prompt: promptText, conversation: session, isTemporary: isTemp)
 
+        } catch GenerationService.GenerationError.freeQuotaExhausted {
+            unwindBlockedSend(session: &session, userMessageId: userMessage.id, conversationId: conversationId, isTemporary: isTemp)
+            return false
         } catch {
             handleGenerationError(error, session: &session)
         }
-
+        return true
     }
 
     /// Ask a question about an attached document. Text is extracted on-device by
     /// DocumentProcessor and included alongside the question so the model can
     /// answer; the file itself is never uploaded. The document is indexed in the
     /// Library and the user can keep asking follow-up questions in this thread.
-    func sendDocumentPrompt(question: String, document: ExtractedDocument, attachment: AttachmentItem) async {
-        guard !isSending else { return }
-        guard var session = currentSession else { return }
+    /// Returns false ONLY when the free quota blocked the request.
+    @discardableResult
+    func sendDocumentPrompt(question: String, document: ExtractedDocument, attachment: AttachmentItem) async -> Bool {
+        guard !isSending else { return true }
+        guard var session = currentSession else { return true }
         isSending = true
         defer { isSending = false }
 
@@ -543,7 +668,6 @@ class ChatViewModel: ObservableObject {
         session.addMessage(userMessage)
         updateSession(session)
         persistMessage(conversationId: conversationId, title: session.title, message: userMessage, attachment: attachment, isTemporary: isTemp)
-        logFileAsset(messageId: userMessage.id, attachment: attachment, prompt: trimmedQuestion, conversation: session, isTemporary: isTemp)
 
         let typingMessage = ChatMessage(role: .assistant, content: "", isTyping: true)
         session.addMessage(typingMessage)
@@ -560,24 +684,35 @@ class ChatViewModel: ObservableObject {
             if document.truncated { composed += " (Showing the first part of a longer document.)" }
             composed += "\n\n--- DOCUMENT CONTENT ---\n\(document.text)\n--- END DOCUMENT ---\n\nUser question: \(trimmedQuestion)"
 
-            let response = try await generation.generateText(
-                message: composed,
-                history: history,
-                memory: memoryText,
-                language: selectedLanguage.name,
-                languageCode: selectedLanguage.code
-            )
+            let requestId = UUID().uuidString
+            let response = try await runQuotaGated {
+                try await generation.generateText(
+                    message: composed,
+                    history: history,
+                    memory: memoryText,
+                    language: selectedLanguage.name,
+                    languageCode: selectedLanguage.code,
+                    requestId: requestId
+                )
+            }
+            recordUsage(response)
 
             session.messages.removeLast()
             let assistantMessage = ChatMessage(role: .assistant, content: response.text ?? "", model: selectedModel.rawValue)
             session.addMessage(assistantMessage)
             updateSession(session)
             persistMessage(conversationId: conversationId, title: session.title, message: assistantMessage, isTemporary: isTemp)
+            // Indexed only after a usable answer — a quota-blocked attempt must
+            // not leave a stray Library entry behind.
+            logFileAsset(messageId: userMessage.id, attachment: attachment, prompt: trimmedQuestion, conversation: session, isTemporary: isTemp)
             scheduleMemoryUpdate(messages: session.messages, isTemporary: isTemp)
+        } catch GenerationService.GenerationError.freeQuotaExhausted {
+            unwindBlockedSend(session: &session, userMessageId: userMessage.id, conversationId: conversationId, isTemporary: isTemp)
+            return false
         } catch {
             handleGenerationError(error, session: &session)
         }
-
+        return true
     }
 
     // MARK: - Asset logging
@@ -672,6 +807,11 @@ class ChatViewModel: ObservableObject {
         guard uid != currentUid else { return }
         let hadUser = currentUid != nil
         currentUid = uid
+
+        // Quota + paywall state is per-account; never bleed across sign-ins.
+        freeQueriesUsedToday = nil
+        usageDayKey = nil
+        showPaywall = false
 
         if hadUser {
             // Sign-out or account switch: drop the previous user's state so the

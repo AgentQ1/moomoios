@@ -50,6 +50,8 @@
 		LV1234567890ABCDEF123456 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LV1234567890ABCDEF123457 /* LoginView.swift */; };
 		MS0000000000000000000002 /* MemoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = MS0000000000000000000001 /* MemoryService.swift */; };
 		SV0000000000000000000002 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SV0000000000000000000001 /* SettingsView.swift */; };
+		ST0000000000000000000002 /* StoreService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ST0000000000000000000001 /* StoreService.swift */; };
+		PW0000000000000000000002 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PW0000000000000000000001 /* PaywallView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -93,6 +95,9 @@
 		LV1234567890ABCDEF123457 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		MS0000000000000000000001 /* MemoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryService.swift; sourceTree = "<group>"; };
 		SV0000000000000000000001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		ST0000000000000000000001 /* StoreService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreService.swift; sourceTree = "<group>"; };
+		PW0000000000000000000001 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
+		SK0000000000000000000001 /* MoomoAI.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = MoomoAI.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -133,6 +138,7 @@
 				8558DA7DBDE3867E63AE0F62 /* ChatView.swift */,
 				8E7D7CF6662129D1FDB60D2E /* LanguageSelectionView.swift */,
 				LV1234567890ABCDEF123457 /* LoginView.swift */,
+				PW0000000000000000000001 /* PaywallView.swift */,
 				A004EF975E90F874CA27BAFC /* MessageBubbleView.swift */,
 				60943EA02994D47F9360BF91 /* ProfileMenuView.swift */,
 				SV0000000000000000000001 /* SettingsView.swift */,
@@ -192,6 +198,7 @@
 			children = (
 				2AE14267C76D1536EBC5FD7B /* Assets.xcassets */,
 				6500000000000000000000F1 /* GoogleService-Info.plist */,
+				SK0000000000000000000001 /* MoomoAI.storekit */,
 				F4F00169E2533939F1ECEECF /* ContentView.swift */,
 				0EBB989791A3CED535D5FE57 /* Info.plist */,
 				E49FC152C57398CDC6D32D62 /* MoomoIOSApp.swift */,
@@ -212,6 +219,7 @@
 				C1C1C1C1C1C1C1C1C1C1C1C1 /* GenerationService.swift */,
 				MS0000000000000000000001 /* MemoryService.swift */,
 				AAAA1111AAAA1111AAAA1111 /* MockAIService.swift */,
+				ST0000000000000000000001 /* StoreService.swift */,
 				9CF15599F41B3F1E76FA15CA /* PersistenceService.swift */,
 				13F4411D7571454CB7739E71 /* DocumentProcessor.swift */,
 				04E3565E65C742DFA988DFD7 /* ImageCache.swift */,
@@ -327,6 +335,8 @@
 				BBBB2222BBBB2222BBBB2222 /* MockAIService.swift in Sources */,
 				MS0000000000000000000002 /* MemoryService.swift in Sources */,
 				SV0000000000000000000002 /* SettingsView.swift in Sources */,
+				ST0000000000000000000002 /* StoreService.swift in Sources */,
+				PW0000000000000000000002 /* PaywallView.swift in Sources */,
 				B4B3E46DCD36A8A0E29E2BE0 /* Language.swift in Sources */,
 				DB7DCA75A5145E663F1527A0 /* LanguageSelectionView.swift in Sources */,
 				LV1234567890ABCDEF123456 /* LoginView.swift in Sources */,

@@ -3,3 +3,4 @@ lib/
 .env
 *.local
 firebase-debug.log
+.secret.local

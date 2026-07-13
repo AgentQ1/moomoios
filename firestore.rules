@@ -38,6 +38,29 @@ service cloud.firestore {
         allow read: if request.auth != null && request.auth.uid == uid;
         allow write: if false;
       }
+
+      // Daily query usage (reserve/commit counters): written ONLY by Cloud
+      // Functions. Client may read its own doc for paywall preflight.
+      match /usage/{document=**} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
+
+      // Premium entitlement: derived exclusively from Apple-signed payloads by
+      // Cloud Functions. A client-writable entitlement would be a free Premium.
+      match /entitlements/{document=**} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
+    }
+
+    // originalTransactionId → uid mappings and unmatched notification events
+    // are backend-internal (Admin SDK only).
+    match /appStoreTransactions/{docId} {
+      allow read, write: if false;
+    }
+    match /appStoreUnmatchedEvents/{docId} {
+      allow read, write: if false;
     }
 
     // Deny everything else by default.

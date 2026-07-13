@@ -33,12 +33,16 @@ struct ContentView: View {
             showSidebar = false
             showLanguageSelection = false
             chatViewModel.handleAuthChange(uid: uid)
+            // Refresh the StoreKit entitlement + backend Premium record for the
+            // new account (and clear paywall presentation state on sign-out).
+            StoreService.shared.handleAuthChange(uid: uid)
         }
         // The auth listener can restore a persisted session before this view is
         // installed, in which case onChange never observes the transition —
         // reconcile once at appear so the cloud chat list always syncs.
         .onAppear {
             chatViewModel.handleAuthChange(uid: authService.currentUser?.id)
+            StoreService.shared.handleAuthChange(uid: authService.currentUser?.id)
         }
     }
 

@@ -19,11 +19,15 @@ final class GenerationService {
         case badResponse
         case offline
         case server(String)   // already-friendly message, safe to show to the user
+        /// The free daily allowance is spent — the UI presents the Premium
+        /// paywall instead of an error bubble, so there is no message here.
+        case freeQuotaExhausted
         var errorDescription: String? {
             switch self {
             case .badResponse: return "Something went wrong. Please try again."
             case .offline: return "You're offline. Check your connection and try again."
             case .server(let message): return message
+            case .freeQuotaExhausted: return "Upgrade to Moomo Premium for unlimited access."
             }
         }
     }
@@ -45,12 +49,14 @@ final class GenerationService {
                       memory: String?,
                       language: String,
                       languageCode: String,
-                      images: [InlineImage] = []) async throws -> GenerationResult {
+                      images: [InlineImage] = [],
+                      requestId: String = UUID().uuidString) async throws -> GenerationResult {
         var payload: [String: Any] = [
             "message": message,
             "history": history,
             "language": language,
             "languageCode": languageCode,
+            "requestId": requestId,
         ]
         if let memory, !memory.isEmpty { payload["memory"] = memory }
         if !images.isEmpty {
@@ -65,22 +71,30 @@ final class GenerationService {
         return try await call("generateText", payload)
     }
 
-    func generateImage(_ prompt: String) async throws -> GenerationResult {
-        try await call("generateImage", ["prompt": prompt])
+    func generateImage(_ prompt: String, requestId: String = UUID().uuidString) async throws -> GenerationResult {
+        try await call("generateImage", ["prompt": prompt, "requestId": requestId])
     }
 
-    func editImage(path: String, instruction: String) async throws -> GenerationResult {
-        try await call("editGeneratedImage", ["path": path, "instruction": instruction])
+    func editImage(path: String, instruction: String, requestId: String = UUID().uuidString) async throws -> GenerationResult {
+        try await call("editGeneratedImage", ["path": path, "instruction": instruction, "requestId": requestId])
     }
 
     /// Edit a user-supplied (attached) image. The raw image bytes are sent inline
     /// as base64 — there is no Storage path for a freshly attached photo.
-    func editImage(imageData: Data, mimeType: String = "image/jpeg", instruction: String) async throws -> GenerationResult {
+    func editImage(imageData: Data, mimeType: String = "image/jpeg", instruction: String, requestId: String = UUID().uuidString) async throws -> GenerationResult {
         try await call("editGeneratedImage", [
             "imageBase64": imageData.base64EncodedString(),
             "mimeType": mimeType,
             "instruction": instruction,
+            "requestId": requestId,
         ])
+    }
+
+    /// Send an Apple-signed transaction (JWS) to the backend, which verifies it
+    /// against Apple's root CAs and records the Premium entitlement for the
+    /// signed-in user. The backend — not this call's result — gates AI access.
+    func verifyAppStorePurchase(jws: String) async throws {
+        _ = try await functions.httpsCallable("verifyAppStorePurchase").call(["jws": jws])
     }
 
     /// Delete the caller's memory profile. Memory is client-read-only, so the
@@ -124,6 +138,12 @@ final class GenerationService {
             #if DEBUG
             print("GENERATION_ERROR fn=\(name) code=\(code.rawValue) message=\(serverMessage)")
             #endif
+            // The backend marks a spent free allowance with a machine-readable
+            // details code — the UI shows the paywall, not an error bubble.
+            if let details = error.userInfo[FunctionsErrorDetailsKey] as? [String: Any],
+               details["moomoCode"] as? String == "FREE_QUOTA_EXHAUSTED" {
+                throw GenerationError.freeQuotaExhausted
+            }
             throw GenerationError.server(Self.friendlyMessage(code: code, serverMessage: serverMessage))
         } catch let error as NSError where error.domain == NSURLErrorDomain {
             // No connectivity never reaches the Functions layer — surface it

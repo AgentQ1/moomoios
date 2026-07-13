@@ -18,11 +18,14 @@ admin.initializeApp();
 const db = admin.firestore();
 const bucket = admin.storage().bucket();
 
+// Quota (reserve → commit/release) and App Store subscription verification.
+// admin.initializeApp() must run before these modules touch Firestore — they
+// only call admin.firestore() lazily, so the import order here is safe.
+import { withQuota, sanitizeRequestId } from "./quota";
+export { verifyAppStorePurchase, appStoreNotifications } from "./appstore";
+
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
-// Daily generation caps (per user, resets each calendar day, UTC).
-const GUEST_DAILY_LIMIT = 5;
-const USER_DAILY_LIMIT = 100;
 const MAX_PROMPT_LEN = 4000;
 const MAX_HISTORY = 20;
 const MAX_MEMORY_LEN = 4000;
@@ -189,61 +192,16 @@ function buildSystemInstruction(args: {
   return sections.join("\n\n");
 }
 
-/** Atomic per-user daily rate limit using a usage/{uid} counter document. */
-async function enforceLimit(caller: Caller): Promise<void> {
-  const limit = caller.isGuest ? GUEST_DAILY_LIMIT : USER_DAILY_LIMIT;
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
-  const ref = db.collection("usage").doc(caller.uid);
-  await db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const data = snap.data();
-    const count = data?.date === today ? (data.count as number) : 0;
-    if (count >= limit) {
-      throw new HttpsError(
-        "resource-exhausted",
-        caller.isGuest
-          ? "Guest daily limit reached. Sign in to continue."
-          : "Daily generation limit reached. Try again tomorrow."
-      );
-    }
-    tx.set(ref, { date: today, count: count + 1 }, { merge: true });
-  });
-}
-
-/** Best-effort refund of one usage unit when generation fails after
- *  enforceLimit already counted it — failed requests must not burn quota. */
-async function refundUsage(caller: Caller): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10);
-  const ref = db.collection("usage").doc(caller.uid);
-  try {
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      const data = snap.data();
-      if (data?.date === today && typeof data.count === "number" && data.count > 0) {
-        tx.set(ref, { date: today, count: data.count - 1 }, { merge: true });
-      }
-    });
-  } catch (err) {
-    logger.warn("Usage refund failed", err);
-  }
-}
-
-/** Run the post-limit part of a generation; refund the usage unit on failure. */
-async function withUsageRefund<T>(caller: Caller, fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    await refundUsage(caller);
-    throw err;
-  }
-}
-
-/** Append a history record and return its id + timestamp. */
+/** Append a history record and return its id + timestamp. `requestId` links the
+ *  record to its quota reservation so retries can replay the stored result;
+ *  `path` (images) lets a replay return the Storage path alongside the URL. */
 async function saveHistory(entry: {
   userId: string;
   prompt: string;
   type: GenType;
   output: string;
+  requestId: string;
+  path?: string;
 }): Promise<{ id: string; createdAt: string }> {
   const createdAt = admin.firestore.FieldValue.serverTimestamp();
   const ref = await db.collection("generations").add({ ...entry, createdAt });
@@ -321,9 +279,9 @@ const opts: CallableOptions = { secrets: [GEMINI_API_KEY], cors: true };
 
 export const generateText = onCall(opts, safe(async (request) => {
   const caller = requireAuth(request);
-  await enforceLimit(caller);
+  const requestId = sanitizeRequestId(request.data?.requestId);
 
-  return withUsageRefund(caller, async () => {
+  return withQuota(caller.uid, requestId, async () => {
     // Structured form: message + history + memory + language + optional inline
     // images (multimodal). The single-string `prompt` form is still accepted
     // for backward compatibility.
@@ -366,7 +324,7 @@ export const generateText = onCall(opts, safe(async (request) => {
       text = await gemini.generateText(GEMINI_API_KEY.value(), prompt);
     }
 
-    const meta = await saveHistory({ userId: caller.uid, prompt: recordedPrompt, type: "text", output: text });
+    const meta = await saveHistory({ userId: caller.uid, prompt: recordedPrompt, type: "text", output: text, requestId });
     return { id: meta.id, type: "text", text, createdAt: meta.createdAt };
   });
 }));
@@ -375,11 +333,11 @@ export const editGeneratedText = onCall(opts, safe(async (request) => {
   const caller = requireAuth(request);
   const current = requireString(request.data?.text, "text");
   const instruction = requireString(request.data?.instruction, "instruction");
-  await enforceLimit(caller);
+  const requestId = sanitizeRequestId(request.data?.requestId);
 
-  return withUsageRefund(caller, async () => {
+  return withQuota(caller.uid, requestId, async () => {
     const text = await gemini.editText(GEMINI_API_KEY.value(), current, instruction);
-    const meta = await saveHistory({ userId: caller.uid, prompt: instruction, type: "text_edit", output: text });
+    const meta = await saveHistory({ userId: caller.uid, prompt: instruction, type: "text_edit", output: text, requestId });
     return { id: meta.id, type: "text_edit", text, createdAt: meta.createdAt };
   });
 }));
@@ -387,12 +345,12 @@ export const editGeneratedText = onCall(opts, safe(async (request) => {
 export const generateImage = onCall(opts, safe(async (request) => {
   const caller = requireAuth(request);
   const prompt = requireString(request.data?.prompt, "prompt");
-  await enforceLimit(caller);
+  const requestId = sanitizeRequestId(request.data?.requestId);
 
-  return withUsageRefund(caller, async () => {
+  return withQuota(caller.uid, requestId, async () => {
     const img = await gemini.generateImage(GEMINI_API_KEY.value(), prompt);
     const { url, path } = await uploadImage(caller.uid, img);
-    const meta = await saveHistory({ userId: caller.uid, prompt, type: "image", output: url });
+    const meta = await saveHistory({ userId: caller.uid, prompt, type: "image", output: url, requestId, path });
     return { id: meta.id, type: "image", url, path, createdAt: meta.createdAt };
   });
 }));
@@ -400,9 +358,9 @@ export const generateImage = onCall(opts, safe(async (request) => {
 export const editGeneratedImage = onCall(opts, safe(async (request) => {
   const caller = requireAuth(request);
   const instruction = requireString(request.data?.instruction, "instruction");
-  await enforceLimit(caller);
+  const requestId = sanitizeRequestId(request.data?.requestId);
 
-  return withUsageRefund(caller, async () => {
+  return withQuota(caller.uid, requestId, async () => {
     // Source image can come from either a previously generated image the caller
     // owns (`path`) OR an inline base64 image the user attached (`imageBase64`).
     let source: gemini.GeneratedImage;
@@ -422,7 +380,7 @@ export const editGeneratedImage = onCall(opts, safe(async (request) => {
 
     const img = await gemini.editImage(GEMINI_API_KEY.value(), source, instruction);
     const out = await uploadImage(caller.uid, img);
-    const meta = await saveHistory({ userId: caller.uid, prompt: instruction, type: "image_edit", output: out.url });
+    const meta = await saveHistory({ userId: caller.uid, prompt: instruction, type: "image_edit", output: out.url, requestId, path: out.path });
     return { id: meta.id, type: "image_edit", url: out.url, path: out.path, createdAt: meta.createdAt };
   });
 }));
@@ -490,11 +448,23 @@ export const deleteUserData = onCall({ cors: true }, safe(async (request) => {
   const caller = requireAuth(request);
   const uid = caller.uid;
 
-  // Firestore user tree (recursive: conversations/messages, assets, memory).
+  // Firestore user tree (recursive: conversations/messages, assets, memory,
+  // usage counters, entitlements).
   await db.recursiveDelete(db.collection("users").doc(uid));
 
-  // Usage counter.
+  // Legacy usage counter (pre-subscription schema).
   await db.collection("usage").doc(uid).delete();
+
+  // App Store transaction → uid mappings. The subscription itself lives with
+  // the Apple ID; a later Restore Purchases re-creates the mapping.
+  {
+    const page = await db.collection("appStoreTransactions").where("uid", "==", uid).limit(100).get();
+    if (!page.empty) {
+      const batch = db.batch();
+      page.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+    }
+  }
 
   // Generation audit log (flat collection keyed by userId field).
   for (;;) {

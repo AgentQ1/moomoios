@@ -1,0 +1,62 @@
+{
+  "identifier" : "8F2A4C61-3D5B-4E9A-9C87-2B1E6F0A5D34",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "",
+    "_developerTeamID" : "JR6W8P6Z8N",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21683917",
+      "localizations" : [
+
+      ],
+      "name" : "Moomo Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6746158321",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited access to Moomo's complete AI experience.",
+              "displayName" : "Moomo Premium",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.moomo.io.premium.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Moomo Premium Monthly",
+          "subscriptionGroupID" : "21683917",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

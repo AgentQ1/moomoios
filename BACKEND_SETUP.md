@@ -43,9 +43,38 @@ with your team. No Apple Services ID / `.p8` key is required for native iOS.
 | `editGeneratedText`  | `{ text, instruction }`   | `{ id, type, text, createdAt }`      |
 | `generateImage`      | `{ prompt }`              | `{ id, type, url, path, createdAt }` |
 | `editGeneratedImage` | `{ path, instruction }`   | `{ id, type, url, path, createdAt }` |
+| `verifyAppStorePurchase` | `{ jws }` (StoreKit 2 signed transaction) | `{ isActive, productId, expiresDateMs, environment }` |
+| `appStoreNotifications` (HTTPS) | App Store Server Notifications V2 `{ signedPayload }` | `200 OK` |
 
-Guests (anonymous) are allowed but rate-limited: **5/day**; signed-in: **100/day**.
-History saved to Firestore `generations/{auto}`: `userId, prompt, type, output, createdAt`.
+Every generation call also accepts a client `requestId` (UUID) used for
+idempotent quota accounting; free-tier responses additionally echo
+`freeQueriesUsedToday` / `freeDailyLimit`.
+History saved to Firestore `generations/{auto}`: `userId, prompt, type, output, requestId, path?, createdAt`.
+
+## Freemium quota + Moomo Premium (StoreKit 2)
+
+- **Free users (incl. guests): 10 successful queries per UTC day**, enforced
+  server-side in `functions/src/quota.ts` via atomic reserve → commit/release
+  transactions on `users/{uid}/usage/current`. Failures/cancellations release
+  the reservation; replayed requestIds return the stored result without
+  consuming. Query 11 is rejected with `resource-exhausted` +
+  `details.moomoCode = "FREE_QUOTA_EXHAUSTED"` **before** the Gemini call —
+  the app shows the Premium paywall and preserves the draft.
+- **Premium** (`com.moomo.io.premium.monthly`, $4.99/month): entitlement stored
+  at `users/{uid}/entitlements/premium`, written ONLY from Apple-signed JWS
+  payloads (`functions/src/appstore.ts`, verified against Apple root CAs in
+  `functions/certs/`). Premium bypasses the free limit (invisible 500/day
+  fair-use cap). `appStoreTransactions/{originalTransactionId}` maps
+  transactions → uid for server notifications.
+- **APP_APPLE_ID** functions param (the app's numeric Apple ID from App Store
+  Connect) must be set before PRODUCTION receipts can verify; sandbox works
+  without it. Set it in `functions/.env`: `APP_APPLE_ID=<number>`, then redeploy.
+- App Store Server Notifications V2 URL (paste into App Store Connect →
+  App Information → App Store Server Notifications, both prod and sandbox):
+  `https://us-central1-moomoios-2026.cloudfunctions.net/appStoreNotifications`.
+- Backend tests: `cd functions && npm run build && firebase emulators:exec
+  --only firestore --project demo-moomo-test "node test-quota.js"` (quota) and
+  `--only auth,functions,firestore ... "node test-callables.js"` (callable surface).
 
 ## Security notes — do not regress
 

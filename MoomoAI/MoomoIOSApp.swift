@@ -13,10 +13,14 @@ import GoogleSignIn
 struct MoomoIOSApp: App {
     @StateObject private var authService = AuthService()
     @StateObject private var chatViewModel = ChatViewModel()
+    @StateObject private var storeService = StoreService.shared
 
     init() {
         FirebaseApp.configure()
         configureAppearance()
+        // Begin observing StoreKit transaction updates (renewals, refunds,
+        // Ask to Buy approvals) as early as possible so none are missed.
+        StoreService.shared.start()
     }
 
     var body: some Scene {
@@ -24,6 +28,7 @@ struct MoomoIOSApp: App {
             ContentView()
                 .environmentObject(authService)
                 .environmentObject(chatViewModel)
+                .environmentObject(storeService)
                 .onOpenURL { url in
                     // Lets Google Sign-In complete its OAuth callback.
                     GIDSignIn.sharedInstance.handle(url)

@@ -55,4 +55,14 @@ struct K {
         static let composerCornerRadius: CGFloat = 28
         static let padding: CGFloat = 20
     }
+
+    // MARK: - Legal (shown on the Premium paywall; required by App Review)
+    struct Legal {
+        /// Apple's standard EULA — acceptable Terms of Use for auto-renewable
+        /// subscriptions per App Review Guideline 3.1.2.
+        static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+        /// Hosted Moomo privacy policy (same URL as ProfileMenuView and the App
+        /// Store Connect privacy-policy field — keep the three in sync).
+        static let privacyPolicyURL = URL(string: "https://moomopro-72876.web.app/privacy-policy.html")!
+    }
 }

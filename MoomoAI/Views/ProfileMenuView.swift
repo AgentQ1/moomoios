@@ -71,12 +71,12 @@ struct ProfileMenuView: View {
                         .padding(.vertical, 8)
                     }
                     
-                    // Personalization & Memory
+                    // Settings: Moomo Premium + Personalization & Memory
                     Section {
                         NavigationLink {
                             SettingsView()
                         } label: {
-                            Label("Personalization & Memory", systemImage: "brain.head.profile")
+                            Label("Settings & Personalization", systemImage: "gearshape.fill")
                         }
                     }
 
