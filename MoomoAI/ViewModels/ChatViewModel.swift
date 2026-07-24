@@ -35,6 +35,10 @@ class ChatViewModel: ObservableObject {
     /// Presents the Moomo Premium paywall. Set when a free user attempts a
     /// query past the daily allowance — the draft and attachments stay intact.
     @Published var showPaywall = false
+    /// Presents the AI data-sharing consent screen (App Review 5.1.1(i)/5.1.2(i)).
+    /// Set on first run before any content can be sent, and again if the user
+    /// attempts a request after declining or revoking permission.
+    @Published var showAIConsent = false
 
     private let persistence = PersistenceService.shared
     private let generation = GenerationService.shared
@@ -235,6 +239,29 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Third-party AI consent
+
+    /// Composer preflight: true when the user has not granted permission to send
+    /// their content to the AI provider, in which case the consent screen is
+    /// presented and the caller must NOT clear the composer or start a request.
+    /// Runs before the quota preflight — permission is a precondition for the
+    /// request existing at all, not a tier question.
+    func blockAndRequestAIConsentIfNeeded() -> Bool {
+        guard !AIDataSharingConsent.shared.isGranted else { return false }
+        showAIConsent = true
+        return true
+    }
+
+    /// First-run entry point: present the disclosure before the user can send
+    /// anything. A previous decline is respected — it is re-raised only when the
+    /// user actually attempts an AI request (see the composer preflight), so
+    /// declining is not punished with a prompt on every launch.
+    func presentAIConsentIfUndecided() {
+        if AIDataSharingConsent.shared.status == .undecided {
+            showAIConsent = true
+        }
+    }
+
     // MARK: - Free quota / paywall
 
     /// Composer preflight: true when the free allowance is already spent, in
@@ -409,6 +436,12 @@ class ChatViewModel: ObservableObject {
 
         let userImage = userMessage.imageData ?? ImageCache.shared.thumbnailData(id: userMessage.id)
         guard !userMessage.content.trimmed.isEmpty || userImage != nil else { return }
+
+        // Regenerate is a fresh third-party request, so it needs the same
+        // permission a first send does. Checked before the existing reply is
+        // swapped for a typing indicator, so a blocked regenerate leaves the
+        // thread visually untouched.
+        guard !blockAndRequestAIConsentIfNeeded() else { return }
 
         isSending = true
         defer { isSending = false }
@@ -891,6 +924,19 @@ class ChatViewModel: ObservableObject {
         #if DEBUG
         print("CHAT_ERROR \(error)")
         #endif
+        // Consent backstop: the composer preflight normally catches this, but if
+        // a request still reached the service without permission, nothing was
+        // sent — explain it in the thread and re-offer the disclosure instead of
+        // showing a generic failure.
+        if case GenerationService.GenerationError.consentRequired = error {
+            if session.messages.last?.isTyping == true {
+                session.messages.removeLast()
+            }
+            session.addMessage(ChatMessage(role: .assistant, content: AIDataSharingDisclosure.blockedMessage))
+            updateSession(session)
+            showAIConsent = true
+            return
+        }
         // A failed image request is surfaced AS an image failure — the model is
         // never silently asked again without the pixels. sendMessage returns
         // false, so ChatView restores the draft and its attachments for retry.

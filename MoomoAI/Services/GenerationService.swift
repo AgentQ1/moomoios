@@ -22,12 +22,17 @@ final class GenerationService {
         /// The free daily allowance is spent — the UI presents the Premium
         /// paywall instead of an error bubble, so there is no message here.
         case freeQuotaExhausted
+        /// The user has not granted (or has withdrawn) permission to send their
+        /// content to the third-party AI provider. The UI presents the consent
+        /// screen; nothing left the device.
+        case consentRequired
         var errorDescription: String? {
             switch self {
             case .badResponse: return "Something went wrong. Please try again."
             case .offline: return "You're offline. Check your connection and try again."
             case .server(let message): return message
             case .freeQuotaExhausted: return "Upgrade to Moomo Premium for unlimited access."
+            case .consentRequired: return AIDataSharingDisclosure.blockedMessage
             }
         }
     }
@@ -36,6 +41,27 @@ final class GenerationService {
     struct InlineImage {
         let data: Data
         let mimeType: String
+    }
+
+    // MARK: - Third-party AI consent gate
+
+    /// Hard precondition for every call that forwards user content to the AI
+    /// provider (App Review 5.1.1(i) / 5.1.2(i)). The UI presents the consent
+    /// screen before the user can reach these paths, but enforcing it here too
+    /// means a background task, a future call site, or a race after the user
+    /// revokes permission still cannot put content on the wire.
+    ///
+    /// Deliberately NOT applied to verifyAppStorePurchase, clearMemory or
+    /// deleteUserData: none of them reach Gemini, and gating account deletion or
+    /// a memory wipe behind consent would break Guideline 5.1.1(v) and trap data
+    /// the user is trying to remove.
+    private func requireAIConsent() throws {
+        guard AIDataSharingConsent.isGrantedSnapshot else {
+            #if DEBUG
+            print("GENERATION_BLOCKED reason=aiDataSharingConsentMissing")
+            #endif
+            throw GenerationError.consentRequired
+        }
     }
 
     // MARK: - Public API (one method per Cloud Function)
@@ -51,6 +77,7 @@ final class GenerationService {
                       languageCode: String,
                       images: [InlineImage] = [],
                       requestId: String = UUID().uuidString) async throws -> GenerationResult {
+        try requireAIConsent()
         var payload: [String: Any] = [
             "message": message,
             "history": history,
@@ -72,17 +99,20 @@ final class GenerationService {
     }
 
     func generateImage(_ prompt: String, requestId: String = UUID().uuidString) async throws -> GenerationResult {
-        try await call("generateImage", ["prompt": prompt, "requestId": requestId])
+        try requireAIConsent()
+        return try await call("generateImage", ["prompt": prompt, "requestId": requestId])
     }
 
     func editImage(path: String, instruction: String, requestId: String = UUID().uuidString) async throws -> GenerationResult {
-        try await call("editGeneratedImage", ["path": path, "instruction": instruction, "requestId": requestId])
+        try requireAIConsent()
+        return try await call("editGeneratedImage", ["path": path, "instruction": instruction, "requestId": requestId])
     }
 
     /// Edit a user-supplied (attached) image. The raw image bytes are sent inline
     /// as base64 — there is no Storage path for a freshly attached photo.
     func editImage(imageData: Data, mimeType: String = "image/jpeg", instruction: String, requestId: String = UUID().uuidString) async throws -> GenerationResult {
-        try await call("editGeneratedImage", [
+        try requireAIConsent()
+        return try await call("editGeneratedImage", [
             "imageBase64": imageData.base64EncodedString(),
             "mimeType": mimeType,
             "instruction": instruction,
@@ -112,7 +142,18 @@ final class GenerationService {
 
     /// Ask the backend to fold recent conversation into the user-memory summary.
     /// Best-effort: failures are logged in DEBUG only and never surface to the UI.
+    ///
+    /// Consent-gated: this ships conversation text to Gemini for summarization,
+    /// and it runs from a detached background task after a reply lands — exactly
+    /// the kind of path that would otherwise keep sending content after the user
+    /// revoked permission.
     func updateMemory(history: [[String: String]]) async {
+        guard AIDataSharingConsent.isGrantedSnapshot else {
+            #if DEBUG
+            print("MEMORY updateMemory skipped=aiDataSharingConsentMissing")
+            #endif
+            return
+        }
         do {
             _ = try await functions.httpsCallable("updateMemory").call(["history": history])
         } catch {

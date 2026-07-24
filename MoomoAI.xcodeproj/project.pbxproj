@@ -53,6 +53,8 @@
 		ST0000000000000000000002 /* StoreService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ST0000000000000000000001 /* StoreService.swift */; };
 		PW0000000000000000000002 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PW0000000000000000000001 /* PaywallView.swift */; };
 		LD0000000000000000000002 /* LegalDocuments.swift in Sources */ = {isa = PBXBuildFile; fileRef = LD0000000000000000000001 /* LegalDocuments.swift */; };
+		AC0000000000000000000002 /* AIDataSharingConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000001 /* AIDataSharingConsent.swift */; };
+		AV0000000000000000000002 /* AIDataConsentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AV0000000000000000000001 /* AIDataConsentView.swift */; };
 		PI0000000000000000000002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = PI0000000000000000000001 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
@@ -101,6 +103,8 @@
 		PW0000000000000000000001 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
 		SK0000000000000000000001 /* MoomoAI.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = MoomoAI.storekit; sourceTree = "<group>"; };
 		LD0000000000000000000001 /* LegalDocuments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalDocuments.swift; sourceTree = "<group>"; };
+		AC0000000000000000000001 /* AIDataSharingConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDataSharingConsent.swift; sourceTree = "<group>"; };
+		AV0000000000000000000001 /* AIDataConsentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDataConsentView.swift; sourceTree = "<group>"; };
 		PI0000000000000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -137,6 +141,7 @@
 		0AA7888CC5BE200934B8AF36 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				AV0000000000000000000001 /* AIDataConsentView.swift */,
 				C9A0CA12CFC9D1FE02C0623B /* AttachmentPickerView.swift */,
 				AF3AF62FA84FB343E21EEF5E /* ChatSessionRowView.swift */,
 				8558DA7DBDE3867E63AE0F62 /* ChatView.swift */,
@@ -158,6 +163,7 @@
 		0F5F6BEED8F6AC388D0E70F4 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				AC0000000000000000000001 /* AIDataSharingConsent.swift */,
 				23C006BAD585E969540E5CD9 /* AnimationConstants.swift */,
 				FFEFF2C68D007E792103FAD7 /* Constants.swift */,
 				7890E14A126C9ED1FEADBE2C /* Extensions.swift */,
@@ -347,6 +353,8 @@
 				B4B3E46DCD36A8A0E29E2BE0 /* Language.swift in Sources */,
 				DB7DCA75A5145E663F1527A0 /* LanguageSelectionView.swift in Sources */,
 				LD0000000000000000000002 /* LegalDocuments.swift in Sources */,
+				AC0000000000000000000002 /* AIDataSharingConsent.swift in Sources */,
+				AV0000000000000000000002 /* AIDataConsentView.swift in Sources */,
 				LV1234567890ABCDEF123456 /* LoginView.swift in Sources */,
 				21D25F51234B312AEFF29230 /* MarkdownFormatter.swift in Sources */,
 				8FFC347EE7CE8EB36FB8198A /* MessageBubbleView.swift in Sources */,

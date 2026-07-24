@@ -129,6 +129,14 @@ struct ChatView: View {
             PaywallView()
                 .environmentObject(StoreService.shared)
         }
+        // AI data-sharing permission. Full-screen and non-dismissible by swipe:
+        // the choice must be deliberate, and Decline is a first-class option that
+        // returns to a fully usable app with AI switched off.
+        .fullScreenCover(isPresented: $chatViewModel.showAIConsent) {
+            AIDataConsentView { _ in
+                chatViewModel.showAIConsent = false
+            }
+        }
         .onChange(of: chatViewModel.currentSession?.id) { _ in
             // Dismiss keyboard when switching to a new session
             isInputFocused = false
@@ -547,6 +555,14 @@ struct ChatView: View {
             return
         }
 
+        // AI data-sharing preflight (App Review 5.1.1(i)/5.1.2(i)): without an
+        // explicit, current-version permission nothing may be sent to the AI
+        // provider. The consent screen is presented and the composer is left
+        // untouched, so accepting and tapping send again just works.
+        if chatViewModel.blockAndRequestAIConsentIfNeeded() {
+            return
+        }
+
         // Free-quota preflight: when the daily allowance is already spent, the
         // paywall is presented WITHOUT touching the composer — the typed prompt
         // and attachments stay exactly as they are, and no request is started.
@@ -770,7 +786,16 @@ struct ChatView: View {
         }
         
         recognitionRequest.shouldReportPartialResults = true
-        
+        // Keep dictation audio on the device wherever the locale supports it.
+        // Without this, SFSpeechRecognizer streams the audio to Apple's speech
+        // servers by default — which would contradict the privacy policy's
+        // statement that no audio leaves the device. Locales without an on-device
+        // model still fall back to Apple's service (disclosed in the policy);
+        // forcing it unconditionally would simply break dictation for them.
+        if speechRecognizer?.supportsOnDeviceRecognition == true {
+            recognitionRequest.requiresOnDeviceRecognition = true
+        }
+
         // Get the input node
         let inputNode = audioEngine.inputNode
         

@@ -40,20 +40,26 @@ struct ContentView: View {
         // opens to the home chat with the sidebar closed (no stale drawer state),
         // and a new user never inherits the previous account's chats. Keyed on
         // the uid (not isSignedIn) so guest → account switches are caught too.
+        //
+        // This modifier is on the Group, so it also runs while LoginView is
+        // showing. Signing IN must therefore not sync from here — that would
+        // pull conversations and upload the Apple purchase JWS while the user is
+        // still being asked to accept the legal documents; that work is scoped
+        // to chatRoot instead, past both gates.
+        //
+        // Signing OUT is handled here and only here, because chatRoot is torn
+        // down by the transition and its onChange would never see it. The
+        // nil-uid path of handleAuthChange is purely local teardown — it drops
+        // the previous account's sessions from memory and disk and makes no
+        // network call (its sync branch is guarded on `uid != nil`). Without
+        // this, one user's chats would still be on disk when the next signs in.
         .onChange(of: authService.currentUser?.id) { uid in
             showSidebar = false
             showLanguageSelection = false
-            chatViewModel.handleAuthChange(uid: uid)
-            // Refresh the StoreKit entitlement + backend Premium record for the
-            // new account (and clear paywall presentation state on sign-out).
-            StoreService.shared.handleAuthChange(uid: uid)
-        }
-        // The auth listener can restore a persisted session before this view is
-        // installed, in which case onChange never observes the transition —
-        // reconcile once at appear so the cloud chat list always syncs.
-        .onAppear {
-            chatViewModel.handleAuthChange(uid: authService.currentUser?.id)
-            StoreService.shared.handleAuthChange(uid: authService.currentUser?.id)
+            if uid == nil {
+                chatViewModel.handleAuthChange(uid: nil)
+                StoreService.shared.handleAuthChange(uid: nil)
+            }
         }
     }
 
@@ -78,6 +84,29 @@ struct ContentView: View {
         .accentColor(K.Colors.accentColor)
         .sheet(isPresented: $showLanguageSelection) {
             LanguageSelectionView()
+        }
+        // Everything below is scoped to chatRoot on purpose: it only runs once
+        // the user is signed in AND has accepted the current legal documents.
+        //
+        // Syncing conversations and re-verifying the App Store purchase are
+        // network calls carrying personal data, so they must not fire while the
+        // welcome screen is still asking for consent. Both handlers are
+        // idempotent (they no-op unless the uid actually changed), so running
+        // them from two places is safe: onAppear covers a session the auth
+        // listener restored before this view existed, onChange covers a
+        // sign-out or guest → account switch made from inside the chat.
+        .onAppear {
+            chatViewModel.handleAuthChange(uid: authService.currentUser?.id)
+            StoreService.shared.handleAuthChange(uid: authService.currentUser?.id)
+            // AI data-sharing permission (App Review 5.1.1(i)/5.1.2(i)) — asked
+            // the moment the user first reaches the chat, before any composer
+            // input can be sent. ChatView owns the presentation so the same
+            // screen serves first run, a blocked send, and a Settings re-grant.
+            chatViewModel.presentAIConsentIfUndecided()
+        }
+        .onChange(of: authService.currentUser?.id) { uid in
+            chatViewModel.handleAuthChange(uid: uid)
+            StoreService.shared.handleAuthChange(uid: uid)
         }
     }
 }
