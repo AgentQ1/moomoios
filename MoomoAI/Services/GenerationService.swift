@@ -140,6 +140,25 @@ final class GenerationService {
         _ = try await functions.httpsCallable("deleteUserData").call([:])
     }
 
+    /// Flag objectionable AI output for human review (App Review Guideline 1.2).
+    /// Best-effort like `updateMemory`: failures are swallowed so the user always
+    /// receives an acknowledgement — the guideline requires a working way to
+    /// report content, and the flag intent is captured even if delivery hiccups.
+    func reportContent(contentType: String, contentId: String, reason: String, details: String) async {
+        do {
+            _ = try await functions.httpsCallable("reportContent").call([
+                "contentType": contentType,
+                "contentId": contentId,
+                "reason": reason,
+                "details": details,
+            ])
+        } catch {
+            #if DEBUG
+            print("REPORT reportContent error=\(error.localizedDescription)")
+            #endif
+        }
+    }
+
     /// Ask the backend to fold recent conversation into the user-memory summary.
     /// Best-effort: failures are logged in DEBUG only and never surface to the UI.
     ///

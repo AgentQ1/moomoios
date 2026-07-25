@@ -28,6 +28,12 @@ final class StoreService: ObservableObject {
     /// every AI request is re-checked server-side.
     @Published private(set) var isPremium = false
     @Published private(set) var monthlyProduct: Product?
+    /// Whether THIS Apple ID can still receive the introductory (3-day free
+    /// trial) offer. StoreKit's `introductoryOffer` is not eligibility-aware —
+    /// it stays non-nil for someone who already used the trial — so the paywall
+    /// must gate all trial copy on this to never advertise a trial Apple won't
+    /// grant (App Review Guideline 3.1.2). Defaults false; the safe direction.
+    @Published private(set) var isEligibleForIntroOffer = false
     @Published private(set) var isPurchasing = false
     @Published private(set) var isRestoring = false
     /// User-visible outcome message for restore/purchase problems (nil = none).
@@ -78,17 +84,23 @@ final class StoreService: ObservableObject {
     // MARK: - Products
 
     func loadProducts() async {
-        guard monthlyProduct == nil else { return }
-        do {
-            let products = try await Product.products(for: [Self.monthlyProductID])
-            monthlyProduct = products.first
-            #if DEBUG
-            print("STORE products loaded=\(products.map(\.id))")
-            #endif
-        } catch {
-            #if DEBUG
-            print("STORE product load failed: \(error)")
-            #endif
+        if monthlyProduct == nil {
+            do {
+                let products = try await Product.products(for: [Self.monthlyProductID])
+                monthlyProduct = products.first
+                #if DEBUG
+                print("STORE products loaded=\(products.map(\.id))")
+                #endif
+            } catch {
+                #if DEBUG
+                print("STORE product load failed: \(error)")
+                #endif
+            }
+        }
+        // Refresh trial eligibility each time the paywall loads (the product is
+        // only fetched once, but eligibility can change across sessions).
+        if let subscription = monthlyProduct?.subscription {
+            isEligibleForIntroOffer = await subscription.isEligibleForIntroOffer
         }
     }
 

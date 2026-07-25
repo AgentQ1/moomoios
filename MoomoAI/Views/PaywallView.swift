@@ -170,7 +170,12 @@ struct PaywallView: View {
     /// introductory offer — nil unless a real free-trial offer is configured, so
     /// the UI never advertises a trial that App Store Connect doesn't grant.
     private var freeTrialPhrase: String? {
-        guard let offer = storeService.monthlyProduct?.subscription?.introductoryOffer,
+        // Only advertise the trial to an Apple ID that is actually eligible —
+        // `introductoryOffer` alone is not eligibility-aware, so a returning user
+        // who already used the trial would otherwise be shown "free trial" and
+        // then charged in full (App Review Guideline 3.1.2 mismatch).
+        guard storeService.isEligibleForIntroOffer,
+              let offer = storeService.monthlyProduct?.subscription?.introductoryOffer,
               offer.paymentMode == .freeTrial else { return nil }
         let n = offer.period.value
         let unit: String
@@ -184,18 +189,26 @@ struct PaywallView: View {
         return "\(n) \(unit) free"
     }
 
-    private var priceLine: String {
-        guard let product = storeService.monthlyProduct else { return "Cancel anytime" }
-        if let trial = freeTrialPhrase {
-            return "\(trial), then \(product.displayPrice)/month"
-        }
-        return "\(product.displayPrice)/month · Cancel anytime"
+    /// The total billed amount — rendered as the paywall's most clear and
+    /// conspicuous pricing element (large serif, navy) per App Review Guideline
+    /// 3.1.2(c). Every other pricing mention on screen stays subordinate to it.
+    private var billedPriceText: String {
+        guard let product = storeService.monthlyProduct else { return "" }
+        return "\(product.displayPrice)/month"
     }
 
-    /// Purchase CTA — names the trial when one exists so the button itself sets
-    /// the expectation, per App Review guidance on introductory offers.
+    /// Subordinate caption beneath the billed price. It acknowledges the trial
+    /// but deliberately does not restate a price or duration that could compete
+    /// with the billed amount above it.
+    private var priceCaption: String {
+        freeTrialPhrase != nil ? "Free trial included · Cancel anytime" : "Cancel anytime"
+    }
+
+    /// Purchase CTA — deliberately neutral ("Subscribe") when a trial exists so
+    /// the button never out-weighs the billed price, which must remain the most
+    /// conspicuous pricing element (App Review Guideline 3.1.2(c)).
     private var ctaTitle: String {
-        freeTrialPhrase != nil ? "Start Free Trial" : "Continue with Premium"
+        freeTrialPhrase != nil ? "Subscribe" : "Continue with Premium"
     }
 
     /// Auto-renewal disclosure required by App Review Guideline 3.1.2. Built from
@@ -203,7 +216,8 @@ struct PaywallView: View {
     private var renewalDisclosure: String {
         let price = storeService.monthlyProduct?.displayPrice
         if let trial = freeTrialPhrase, let price {
-            return "Free for your first \(trial.replacingOccurrences(of: " free", with: "")), then \(price) per month. The subscription auto-renews monthly and your Apple ID is charged \(price) unless you cancel at least 24 hours before the period ends. Manage or cancel anytime in your App Store settings."
+            let duration = trial.replacingOccurrences(of: " free", with: "")
+            return "\(price) per month. The first \(duration) are free; after that your Apple ID is charged \(price) each month unless you cancel at least 24 hours before the period ends. Manage or cancel anytime in your App Store settings."
         }
         if let price {
             return "\(price) per month. The subscription auto-renews monthly and your Apple ID is charged \(price) unless you cancel at least 24 hours before the period ends. Manage or cancel anytime in your App Store settings."
@@ -213,6 +227,41 @@ struct PaywallView: View {
 
     private var purchaseBlock: some View {
         VStack(spacing: 14) {
+            // Billed amount as the hero — the most clear and conspicuous pricing
+            // element on the paywall (App Review Guideline 3.1.2(c)). The trial
+            // and renewal text below stay subordinate to it in size and weight.
+            if storeService.monthlyProduct != nil {
+                VStack(spacing: 5) {
+                    Text(billedPriceText)
+                        .font(.system(size: 34, weight: .bold, design: .serif))
+                        .foregroundColor(K.Colors.navy)
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                    Text(priceCaption)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(K.Colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+            } else {
+                // Never present a live Subscribe button over a blank price. If the
+                // StoreKit product hasn't loaded (no network, or the Paid Apps
+                // agreement / IAP isn't review-ready), show an explicit state with
+                // Retry instead of an empty price hero (Guideline 3.1.2 / 2.1).
+                VStack(spacing: 8) {
+                    Text("Subscription details are unavailable right now.")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(K.Colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                    Button("Retry") {
+                        HapticFeedback.light()
+                        Task { await storeService.loadProducts() }
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(K.Colors.navyText)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
             Button {
                 HapticFeedback.medium()
                 Task { await storeService.purchase() }
@@ -237,11 +286,8 @@ struct PaywallView: View {
                 }
                 .frame(height: 56)
             }
-            .disabled(storeService.isPurchasing || storeService.isRestoring)
-
-            Text(priceLine)
-                .font(.system(size: 13.5, weight: .medium))
-                .foregroundColor(K.Colors.slate)
+            .disabled(storeService.isPurchasing || storeService.isRestoring || storeService.monthlyProduct == nil)
+            .opacity(storeService.monthlyProduct == nil ? 0.5 : 1)
 
             // Auto-renewal disclosure required by App Review Guideline 3.1.2 —
             // shown on the paywall itself, not only in the linked Terms.

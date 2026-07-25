@@ -30,6 +30,8 @@ enum ImageSource: Equatable {
 struct ImagePreviewView: View {
     let source: ImageSource
     var caption: String? = nil
+    /// When set, a Report control is shown (AI-generated images only).
+    var report: ReportableContent? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -45,6 +47,7 @@ struct ImagePreviewView: View {
     @State private var showShareSheet = false
     @State private var saveToast: String?
     @State private var showControls = true
+    @State private var reportTarget: ReportableContent?
 
     private let maxScale: CGFloat = 5
     private let minScale: CGFloat = 1
@@ -67,6 +70,9 @@ struct ImagePreviewView: View {
         .onAppear(perform: loadImage)
         .sheet(isPresented: $showShareSheet) {
             if let uiImage { ShareSheet(items: [uiImage]) }
+        }
+        .sheet(item: $reportTarget) { target in
+            ReportContentView(content: target)
         }
     }
 
@@ -162,12 +168,23 @@ struct ImagePreviewView: View {
                         actionButton(icon: "square.and.arrow.up", label: "Share") {
                             showShareSheet = true
                         }
+                        .disabled(uiImage == nil)
+                        .opacity(uiImage == nil ? 0.4 : 1)
+
                         actionButton(icon: "square.and.arrow.down", label: "Save") {
                             saveToPhotos()
                         }
+                        .disabled(uiImage == nil)
+                        .opacity(uiImage == nil ? 0.4 : 1)
+
+                        // Report stays enabled even if the thumbnail failed to
+                        // load — the content is still reportable (Guideline 1.2).
+                        if let report {
+                            actionButton(icon: "flag", label: "Report") {
+                                reportTarget = report
+                            }
+                        }
                     }
-                    .disabled(uiImage == nil)
-                    .opacity(uiImage == nil ? 0.4 : 1)
                 }
                 .padding(.bottom, 28)
                 .transition(.opacity)

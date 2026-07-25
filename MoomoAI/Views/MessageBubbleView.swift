@@ -17,6 +17,7 @@ struct MessageBubbleView: View {
     @State private var showCopyButton = false
     @State private var showCopyToast = false
     @State private var showFullScreenImage = false
+    @State private var reportTarget: ReportableContent?
 
     init(message: ChatMessage,
          onReact: ((String) -> Void)? = nil,
@@ -68,9 +69,20 @@ struct MessageBubbleView: View {
         }
         .fullScreenCover(isPresented: $showFullScreenImage) {
             if let source = previewSource {
-                ImagePreviewView(source: source, caption: previewCaption)
+                ImagePreviewView(source: source, caption: previewCaption, report: previewReport)
             }
         }
+        .sheet(item: $reportTarget) { target in
+            ReportContentView(content: target)
+        }
+    }
+
+    /// Reportable descriptor for an AI-generated image (never for the user's own
+    /// attached photo). Feeds the full-screen preview's Report control.
+    private var previewReport: ReportableContent? {
+        guard message.role == .assistant,
+              let urlString = message.imageURL, !urlString.isEmpty else { return nil }
+        return ReportableContent(id: urlString, kind: .image, preview: message.prompt ?? "")
     }
 
     /// Decoded thumbnail for an attached image, served from the memory-cached
@@ -151,6 +163,15 @@ struct MessageBubbleView: View {
                                         Label("Delete", systemImage: "trash")
                                     }
                                 }
+                                Button {
+                                    reportTarget = ReportableContent(
+                                        id: message.id,
+                                        kind: .message,
+                                        preview: String(message.content.prefix(280))
+                                    )
+                                } label: {
+                                    Label("Report", systemImage: "flag")
+                                }
                             }
 
                         // Action bar (copy • like • dislike • regenerate).
@@ -224,6 +245,15 @@ struct MessageBubbleView: View {
                     Button(action: { copy(prompt) }) {
                         Label("Copy prompt", systemImage: "doc.on.doc")
                     }
+                }
+                Button {
+                    reportTarget = ReportableContent(
+                        id: message.imageURL ?? message.id,
+                        kind: .image,
+                        preview: message.prompt ?? ""
+                    )
+                } label: {
+                    Label("Report", systemImage: "flag")
                 }
             }
 
@@ -312,6 +342,133 @@ struct MessageBubbleView: View {
         UIPasteboard.general.string = text
         #endif
         withAnimation { showCopyToast = true }
+    }
+}
+
+// MARK: - Content reporting (App Review Guideline 1.2)
+
+/// A piece of AI-generated content a user can flag as objectionable. Presented
+/// from message, image-preview, and library surfaces so every AI-output surface
+/// has a working "report it" path.
+struct ReportableContent: Identifiable {
+    enum Kind: String { case message, image }
+    let id: String
+    let kind: Kind
+    let preview: String
+}
+
+/// Sheet that lets a user report objectionable AI output. Submits a best-effort
+/// report to the backend and always acknowledges, giving Guideline 1.2 its
+/// required in-app reporting mechanism.
+struct ReportContentView: View {
+    let content: ReportableContent
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedReason: String?
+    @State private var details = ""
+    @State private var isSubmitting = false
+    @State private var didSubmit = false
+
+    private let reasons = [
+        "Hateful, abusive, or harassing",
+        "Sexually explicit",
+        "Violent or dangerous",
+        "Illegal or infringing",
+        "Other",
+    ]
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if didSubmit { confirmation } else { form }
+            }
+            .navigationTitle("Report content")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if !didSubmit { Button("Cancel") { dismiss() } }
+                }
+            }
+        }
+    }
+
+    private var form: some View {
+        Form {
+            Section {
+                Text("Tell us what's wrong with this content. Our team reviews reports and removes content that violates our guidelines, usually within 24 hours.")
+                    .font(.system(size: 13))
+                    .foregroundColor(K.Colors.textSecondary)
+            }
+            Section("Reason") {
+                ForEach(reasons, id: \.self) { reason in
+                    Button(action: { selectedReason = reason }) {
+                        HStack {
+                            Text(reason).foregroundColor(K.Colors.textPrimary)
+                            Spacer()
+                            if selectedReason == reason {
+                                Image(systemName: "checkmark").foregroundColor(K.Colors.accentColor)
+                            }
+                        }
+                    }
+                }
+            }
+            Section("Details (optional)") {
+                TextField("Add anything that helps us review this", text: $details, axis: .vertical)
+                    .lineLimit(3, reservesSpace: true)
+            }
+            Section {
+                Button(action: submit) {
+                    HStack {
+                        Spacer()
+                        if isSubmitting {
+                            ProgressView()
+                        } else {
+                            Text("Submit report").fontWeight(.semibold)
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(selectedReason == nil || isSubmitting)
+            }
+        }
+    }
+
+    private var confirmation: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 52))
+                .foregroundColor(K.Colors.accentColor)
+            Text("Report received")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(K.Colors.textPrimary)
+            Text("Thanks for flagging this. Our team will review it and take action on content that violates our guidelines.")
+                .font(.system(size: 14))
+                .foregroundColor(K.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button("Done") { dismiss() }
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(K.Colors.navyText)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    private func submit() {
+        guard let reason = selectedReason else { return }
+        isSubmitting = true
+        Task {
+            await GenerationService.shared.reportContent(
+                contentType: content.kind.rawValue,
+                contentId: content.id,
+                reason: reason,
+                details: details
+            )
+            isSubmitting = false
+            HapticFeedback.success()
+            withAnimation { didSubmit = true }
+        }
     }
 }
 

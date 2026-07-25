@@ -85,6 +85,7 @@ struct LibraryView: View {
     @State private var searchText = ""
     @State private var previewAsset: LibraryAsset?
     @State private var detailAsset: LibraryAsset?
+    @State private var reportTarget: ReportableContent?
 
     init(initialFilter: LibraryFilter = .all) {
         _filter = State(initialValue: initialFilter)
@@ -120,11 +121,18 @@ struct LibraryView: View {
         .task { await store.loadInitial() }
         .fullScreenCover(item: $previewAsset) { asset in
             if let urlString = asset.url, let url = URL(string: urlString) {
-                ImagePreviewView(source: .remote(url), caption: asset.prompt)
+                ImagePreviewView(
+                    source: .remote(url),
+                    caption: asset.prompt,
+                    report: ReportableContent(id: asset.url ?? asset.id, kind: .image, preview: asset.prompt)
+                )
             }
         }
         .sheet(item: $detailAsset) { asset in
             AssetDetailView(asset: asset)
+        }
+        .sheet(item: $reportTarget) { target in
+            ReportContentView(content: target)
         }
     }
 
@@ -169,6 +177,15 @@ struct LibraryView: View {
                         LibraryCell(asset: asset)
                             .onTapGesture { open(asset) }
                             .contextMenu {
+                                Button {
+                                    reportTarget = ReportableContent(
+                                        id: asset.url ?? asset.id,
+                                        kind: .image,
+                                        preview: asset.prompt
+                                    )
+                                } label: {
+                                    Label("Report", systemImage: "flag")
+                                }
                                 Button(role: .destructive) { store.delete(asset) } label: {
                                     Label("Remove from Library", systemImage: "trash")
                                 }

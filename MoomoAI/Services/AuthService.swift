@@ -204,7 +204,15 @@ final class AuthService: NSObject, ObservableObject {
                 } else if isGoogle {
                     _ = try await user.reauthenticate(with: googleCredential())
                 } else {
-                    throw AuthError.message("Please sign in again, then retry deleting your account.")
+                    // Anonymous (guest) account: Firebase exposes no credential to
+                    // re-authenticate with, so user.delete() cannot clear the
+                    // requiresRecentLogin state and there is no "sign in again" the
+                    // guest could perform. The server-side data wipe above already
+                    // ran and the residual anonymous Auth record carries no PII, so
+                    // honor the deletion by signing the guest out instead of
+                    // dead-ending them on an impossible instruction (5.1.1(v)).
+                    signOut()
+                    return true
                 }
                 try await finalizeDeletion(user, isApple: isApple, appleAuthCode: appleAuthCode)
                 return true

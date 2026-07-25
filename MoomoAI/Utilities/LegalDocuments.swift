@@ -19,7 +19,9 @@ enum LegalDocuments {
     /// added the in-app permission flow and the equal-protection commitment.
     static let privacyPolicyVersion = "2026-07-23"
     /// Bump when the Terms of Service materially change (same re-accept rule).
-    static let termsOfServiceVersion = "2026-07-23"
+    /// 2026-07-24: added the objectionable-content policy and the in-app content
+    /// reporting commitment (App Review Guideline 1.2).
+    static let termsOfServiceVersion = "2026-07-24"
 
     static let privacyPolicyTitle = "Privacy Policy"
     static let termsOfServiceTitle = "Terms of Service"
@@ -130,7 +132,7 @@ enum LegalDocuments {
 
     static let termsOfService = """
     Moomo AI — Terms of Service
-    Effective date: July 23, 2026 · Moomolab LLC
+    Effective date: July 24, 2026 · Moomolab LLC
 
     These Terms of Service ("Terms") are an agreement between you and Moomolab LLC ("Moomolab", "we") governing your use of the Moomo AI application and related services (the "Service"). By using the Service you agree to these Terms. These Terms also serve as the end-user license agreement (EULA) for the app.
 
@@ -153,6 +155,8 @@ enum LegalDocuments {
     4. ACCEPTABLE USE
 
     You agree not to: violate law; attempt to bypass quotas, security rules, or entitlement checks; probe or disrupt the Service; generate or distribute content that is illegal, infringing, or intended to harm others; misrepresent AI output as human-authored where that matters; or use the Service to develop competing models from our output at scale.
+
+    OBJECTIONABLE CONTENT AND REPORTING. We have zero tolerance for objectionable content, including material that is unlawful, hateful, harassing, sexually explicit, or that promotes violence or harm. You can report objectionable AI output at any time using the Report control available on any AI message or generated image. We review every report and will remove content that violates these Terms and, where warranted, suspend or terminate the accounts responsible.
 
     5. YOUR CONTENT AND LICENSE
 
