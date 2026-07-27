@@ -1,66 +1,52 @@
 {
-  "identifier" : "5D91B7E3-6A2C-4F18-8E4B-7C3A9D2F1B60",
-  "nonRenewingSubscriptions" : [
-
-  ],
-  "products" : [
-
-  ],
-  "settings" : {
-    "_applicationInternalID" : "",
-    "_developerTeamID" : "JR6W8P6Z8N",
-    "_failTransactionsEnabled" : false,
-    "_locale" : "en_US",
-    "_storefront" : "USA",
-    "_storeKitErrors" : [
-
-    ]
+  "identifier": "5D91B7E3-6A2C-4F18-8E4B-7C3A9D2F1B60",
+  "nonRenewingSubscriptions": [],
+  "products": [],
+  "settings": {
+    "_applicationInternalID": "",
+    "_developerTeamID": "JR6W8P6Z8N",
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": []
   },
-  "subscriptionGroups" : [
+  "subscriptionGroups": [
     {
-      "id" : "40218750",
-      "localizations" : [
-
-      ],
-      "name" : "Moomo Premium",
-      "subscriptions" : [
+      "id": "22268782",
+      "localizations": [],
+      "name": "Moomo Premium 2026",
+      "subscriptions": [
         {
-          "adHocOffers" : [
-
-          ],
-          "codeOffers" : [
-
-          ],
-          "displayPrice" : "29.99",
-          "familyShareable" : false,
-          "groupNumber" : 1,
-          "internalID" : "40218751",
-          "introductoryOffer" : {
-            "internalID" : "40218752",
-            "paymentMode" : "free",
-            "subscriptionPeriod" : "P3D"
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "29.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "6795246785",
+          "introductoryOffer": {
+            "internalID": "40218752",
+            "paymentMode": "free",
+            "subscriptionPeriod": "P3D"
           },
-          "localizations" : [
+          "localizations": [
             {
-              "description" : "Unlimited AI chat, images, files & search",
-              "displayName" : "Moomo Premium",
-              "locale" : "en_US"
+              "description": "Unlimited AI chat, images, files and search",
+              "displayName": "Moomo Premium",
+              "locale": "en_US"
             }
           ],
-          "productID" : "com.moomolab.moomo.premium.monthly",
-          "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "Moomo Premium Monthly",
-          "subscriptionGroupID" : "40218750",
-          "type" : "RecurringSubscription",
-          "winbackOffers" : [
-
-          ]
+          "productID": "com.moomolab.moomo.premium.monthly.v2",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Moomo Premium Monthly V2",
+          "subscriptionGroupID": "22268782",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
         }
       ]
     }
   ],
-  "version" : {
-    "major" : 4,
-    "minor" : 0
+  "version": {
+    "major": 4,
+    "minor": 0
   }
 }

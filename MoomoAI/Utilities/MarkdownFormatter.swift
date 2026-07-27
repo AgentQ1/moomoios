@@ -62,6 +62,16 @@ enum MarkdownFormatter {
         return value
     }
 
+    /// Flattened plain text for one-line summaries (chat list previews).
+    /// Routed through the same cached parse as rendering so list rows can never
+    /// show the raw `**`/`#` markers that the message body strips out.
+    static func plainText(for text: String) -> String {
+        let joined = blocks(for: text)
+            .map { String($0.text.characters) }
+            .joined(separator: " ")
+        return joined.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
     private static func parse(_ text: String) -> [MarkdownBlock] {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .full,
@@ -235,14 +245,19 @@ struct MarkdownText: View {
         .tint(K.Colors.royalBlue) // link color
     }
 
-    /// Compact, chat-style vertical rhythm: list rows sit tight, paragraphs
-    /// breathe, headings get extra air above.
+    /// Editorial vertical rhythm. Long answers are read, not skimmed, so
+    /// paragraphs get real separation and headings open a clear new section —
+    /// the spacing does the structural work that a wall of even text can't.
     private func topSpacing(of block: MarkdownBlock, in blocks: [MarkdownBlock]) -> CGFloat {
         guard block.id > 0 else { return 0 }
-        switch (blocks[block.id - 1].kind, block.kind) {
-        case (.listItem, .listItem): return 5
-        case (_, .heading): return 14
-        default: return 10
+        let previous = blocks[block.id - 1].kind
+        switch (previous, block.kind) {
+        case (.listItem, .listItem): return 10
+        case (_, .heading): return 26
+        case (.heading, _): return 12
+        case (_, .codeBlock), (.codeBlock, _): return 16
+        case (_, .listItem): return 14
+        default: return 16
         }
     }
 
@@ -253,28 +268,33 @@ struct MarkdownText: View {
             styledText(block.text, font: .body)
 
         case .heading(let level):
-            styledText(block.text, font: headingFont(level))
+            styledText(block.text, font: headingFont(level), color: K.Colors.navy)
 
         case .listItem(let depth, let marker):
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(marker)
-                    .font(.body)
-                    .foregroundColor(K.Colors.ink)
-                    .frame(minWidth: 16, alignment: .trailing)
+                    .font(markerFont(for: marker))
+                    .foregroundColor(markerColor(for: marker))
+                    .frame(minWidth: 18, alignment: .trailing)
                 styledText(block.text, font: .body)
             }
-            .padding(.leading, CGFloat(depth) * 18)
+            .padding(.leading, CGFloat(depth) * 20)
 
         case .codeBlock(let language):
             codeBlockView(block.text, language: language)
 
         case .blockQuote:
-            HStack(alignment: .top, spacing: 10) {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(K.Colors.goldSoft)
-                    .frame(width: 3)
-                styledText(block.text, font: .body, color: K.Colors.textSecondary)
+            HStack(alignment: .top, spacing: 14) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(K.Colors.gold)
+                    .frame(width: 4)
+                styledText(
+                    block.text,
+                    font: .system(.body, design: .serif).italic(),
+                    color: K.Colors.textSecondary
+                )
             }
+            .padding(.vertical, 2)
 
         case .thematicBreak:
             Divider().overlay(K.Colors.borderColor)
@@ -285,19 +305,31 @@ struct MarkdownText: View {
         Text(text)
             .font(font)
             .foregroundColor(color)
-            .lineSpacing(3.5)
+            .lineSpacing(6.5)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Headings carry the brand serif — the same voice as the "Moomo" wordmark —
+    /// so a long answer reads like an edited document rather than chat output.
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .system(.title2).weight(.semibold)
-        case 2: return .system(.title3).weight(.semibold)
-        default: return .system(.headline)
+        case 1: return .system(.title2, design: .serif).weight(.bold)
+        case 2: return .system(.title3, design: .serif).weight(.semibold)
+        default: return .system(.headline, design: .serif).weight(.semibold)
         }
+    }
+
+    /// Ordered markers ("3.") are numerals and read as structure, so they take
+    /// the navy accent; bullets are decorative and take gold.
+    private func markerFont(for marker: String) -> Font {
+        marker.hasSuffix(".") ? .system(.body, design: .serif).weight(.semibold) : .body
+    }
+
+    private func markerColor(for marker: String) -> Color {
+        marker.hasSuffix(".") ? K.Colors.brandNavy : K.Colors.gold
     }
 
     /// Fenced code block: monospaced, on a card, horizontally scrollable so

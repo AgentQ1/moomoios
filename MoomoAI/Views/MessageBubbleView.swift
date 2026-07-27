@@ -205,22 +205,30 @@ struct MessageBubbleView: View {
     }
 
     // MARK: - Generated Image Card
+    /// Fixed side for the generated-image card, shared by the placeholder and the
+    /// loaded image so the row's height is identical before and after loading.
+    private static let imageCardSide: CGFloat = 300
+
     private func generatedImageCard(url: URL) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Button(action: { showFullScreenImage = true }) {
+                // Both states occupy the SAME fixed box. An unbounded height here
+                // (scaledToFit with only a maxWidth) makes the row resize when the
+                // image lands, which dirties the enclosing LazyVStack and kicks off
+                // a layout/prefetch feedback loop that hangs the app.
                 CachedAsyncImage(url: url) { image in
                     image
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: 320)
+                        .frame(width: Self.imageCardSide, height: Self.imageCardSide)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                 } placeholder: {
                     ZStack {
                         RoundedRectangle(cornerRadius: 16)
                             .fill(K.Colors.backgroundSecondary)
-                            .frame(width: 240, height: 240)
                         ProgressView().tint(K.Colors.textSecondary)
                     }
+                    .frame(width: Self.imageCardSide, height: Self.imageCardSide)
                 }
             }
             .buttonStyle(.plain)

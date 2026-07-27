@@ -31,7 +31,11 @@ struct ChatSession: Identifiable, Codable, Equatable, Hashable {
     }
     
     var preview: String {
-        messages.last?.content.prefix(50).description ?? "New chat"
+        guard let content = messages.last?.content else { return "New chat" }
+        // Strip markdown before truncating — truncating first can cut a marker
+        // in half and leave "**Quantum mechanics** is the bra" in the list.
+        let plain = MarkdownFormatter.plainText(for: content)
+        return plain.isEmpty ? "New chat" : String(plain.prefix(50))
     }
     
     var messageCount: Int {

@@ -28,8 +28,17 @@ import {
 } from "@apple/app-store-server-library";
 
 export const BUNDLE_ID = "com.moomolab.moomo";
-/** Must match the auto-renewable product ID configured in App Store Connect. */
-export const MONTHLY_PRODUCT_ID = "com.moomolab.moomo.premium.monthly";
+/**
+ * Must match the auto-renewable product ID configured in App Store Connect
+ * (and `StoreService.monthlyProductID` in the app).
+ *
+ * The `.v2` suffix is not a version marker: the original
+ * `com.moomolab.moomo.premium.monthly` was deleted after its localization became
+ * permanently stuck in WAITING_FOR_REVIEW, and Apple never releases a product ID
+ * once used. The old ID is deliberately NOT accepted — that product no longer
+ * exists in App Store Connect, so Apple can never issue a transaction for it.
+ */
+export const MONTHLY_PRODUCT_ID = "com.moomolab.moomo.premium.monthly.v2";
 const ALLOWED_PRODUCT_IDS = new Set([MONTHLY_PRODUCT_ID]);
 
 /**

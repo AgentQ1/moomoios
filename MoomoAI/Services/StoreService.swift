@@ -19,10 +19,15 @@ final class StoreService: ObservableObject {
     static let shared = StoreService()
 
     /// Auto-renewable monthly subscription configured in App Store Connect
-    /// (subscription group "Moomo Premium", $29.99/month US after a 3-day free
-    /// trial). Price and the trial offer are read live from StoreKit — never
-    /// hard-coded in UI — so this stays in sync with App Store Connect.
-    static let monthlyProductID = "com.moomolab.moomo.premium.monthly"
+    /// (subscription group "Moomo Premium 2026", $29.99/month US after a 3-day
+    /// free trial). Price and the trial offer are read live from StoreKit —
+    /// never hard-coded in UI — so this stays in sync with App Store Connect.
+    ///
+    /// The `.v2` suffix is not a version marker: the original
+    /// `com.moomolab.moomo.premium.monthly` product had to be deleted after its
+    /// localization became permanently stuck in WAITING_FOR_REVIEW, and Apple
+    /// never releases a product ID once used. Do not "clean this up".
+    static let monthlyProductID = "com.moomolab.moomo.premium.monthly.v2"
 
     /// Local mirror of the verified StoreKit entitlement. UI gating only —
     /// every AI request is re-checked server-side.

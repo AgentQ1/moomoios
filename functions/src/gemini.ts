@@ -16,6 +16,46 @@ function ai(apiKey: string): GoogleGenAI {
   return client;
 }
 
+/** Upstream statuses that mean "busy, try again" rather than "your request is wrong". */
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 4;
+
+/**
+ * Dig the HTTP status out of a @google/genai failure. Its ServerError carries
+ * the code only inside the message (`got status: 503 Service Unavailable. {…}`),
+ * so parse that first and fall back to a numeric `status` field.
+ */
+function statusOf(err: unknown): number | null {
+  const message = err instanceof Error ? err.message : String(err);
+  const parsed = /got status:\s*(\d{3})/.exec(message);
+  if (parsed) return Number(parsed[1]);
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : null;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Gemini returns a transient 503 ("this model is currently experiencing high
+ * demand") often enough that a single unguarded call surfaces as a user-facing
+ * failure. Retry only the statuses that indicate upstream capacity, with
+ * exponential backoff plus jitter so retries don't align across instances.
+ * Worst case adds ~3.5s of waiting, well inside the 60s callable timeout.
+ */
+async function withRetry<T>(label: string, call: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call();
+    } catch (err) {
+      const status = statusOf(err);
+      if (attempt >= MAX_ATTEMPTS || status === null || !RETRYABLE_STATUS.has(status)) throw err;
+      const backoffMs = 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250);
+      console.warn({ message: "gemini retry", label, status, attempt, backoffMs });
+      await sleep(backoffMs);
+    }
+  }
+}
+
 export interface GeneratedImage {
   data: Buffer;
   mimeType: string;
@@ -63,11 +103,13 @@ export async function chat(
       ],
     },
   ];
-  const res = await ai(apiKey).models.generateContent({
-    model: TEXT_MODEL,
-    contents,
-    config: { systemInstruction: args.system },
-  });
+  const res = await withRetry("chat", () =>
+    ai(apiKey).models.generateContent({
+      model: TEXT_MODEL,
+      contents,
+      config: { systemInstruction: args.system },
+    })
+  );
   const text = res.text?.trim();
   if (!text) throw new Error("Empty text response from Gemini");
   return text;
@@ -75,10 +117,12 @@ export async function chat(
 
 /** Plain single-prompt text generation (utility calls: text edit, memory). */
 export async function generateText(apiKey: string, prompt: string): Promise<string> {
-  const res = await ai(apiKey).models.generateContent({
-    model: TEXT_MODEL,
-    contents: prompt,
-  });
+  const res = await withRetry("generateText", () =>
+    ai(apiKey).models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+    })
+  );
   const text = res.text?.trim();
   if (!text) throw new Error("Empty text response from Gemini");
   return text;
@@ -168,10 +212,12 @@ function extractImage(res: { candidates?: Array<{ content?: { parts?: Array<{ in
 
 /** Text -> image. */
 export async function generateImage(apiKey: string, prompt: string): Promise<GeneratedImage> {
-  const res = await ai(apiKey).models.generateContent({
-    model: IMAGE_MODEL,
-    contents: prompt,
-  });
+  const res = await withRetry("generateImage", () =>
+    ai(apiKey).models.generateContent({
+      model: IMAGE_MODEL,
+      contents: prompt,
+    })
+  );
   return extractImage(res);
 }
 
@@ -181,12 +227,14 @@ export async function editImage(
   source: { data: Buffer; mimeType: string },
   instruction: string
 ): Promise<GeneratedImage> {
-  const res = await ai(apiKey).models.generateContent({
-    model: IMAGE_MODEL,
-    contents: [
-      { inlineData: { data: source.data.toString("base64"), mimeType: source.mimeType } },
-      { text: instruction },
-    ],
-  });
+  const res = await withRetry("editImage", () =>
+    ai(apiKey).models.generateContent({
+      model: IMAGE_MODEL,
+      contents: [
+        { inlineData: { data: source.data.toString("base64"), mimeType: source.mimeType } },
+        { text: instruction },
+      ],
+    })
+  );
   return extractImage(res);
 }
